@@ -50,6 +50,46 @@ lein repl
 	 (take 10))
 
 
+({:average-loss 0.13688436523933248,
+  :model-name ":libsvm/regression",
+  :predict-time 5644,
+  :train-time 26667}
+ {:average-loss 0.13834159074948366,
+  :model-name ":libsvm/regression",
+  :predict-time 7252,
+  :train-time 29334}
+ {:average-loss 0.13866556643381417,
+  :model-name ":libsvm/regression",
+  :predict-time 5903,
+  :train-time 25517}
+ {:average-loss 0.13998699135016368,
+  :model-name ":libsvm/regression",
+  :predict-time 6692,
+  :train-time 25583}
+ {:average-loss 0.14019045847187636,
+  :model-name ":libsvm/regression",
+  :predict-time 7357,
+  :train-time 30734}
+ {:average-loss 0.1420648520842034,
+  :model-name ":libsvm/regression",
+  :predict-time 6479,
+  :train-time 26369}
+ {:average-loss 0.14248508919110822,
+  :model-name ":libsvm/regression",
+  :predict-time 5872,
+  :train-time 25348}
+ {:average-loss 0.1427344709806652,
+  :model-name ":libsvm/regression",
+  :predict-time 2878,
+  :train-time 13883}
+ {:average-loss 0.14287008716315316,
+  :model-name ":libsvm/regression",
+  :predict-time 6527,
+  :train-time 25856}
+ {:average-loss 0.14308160918576537,
+  :model-name ":libsvm/regression",
+  :predict-time 6295,
+  :train-time 26868})
 ```
 
 There is no real dataset engineering past what I had to do to get things to load.  It is interesting
