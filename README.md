@@ -14,7 +14,7 @@ The data is under data/aimes-house-prices
 
 Make sure you have openblas/atlas isntalled as well as libsvm.
 
-If SVM doesn't work just remove it from the gridsearch pathways.  It is an old C 
+If SVM doesn't work just remove it from the gridsearch pathways.  It is an old C
 library that can be temperamental.  From ubuntu it works fine on jvm 8.
 
 
@@ -27,6 +27,10 @@ lein repl
 (require '[clj-ml-wkg/aimes-house-prices])
 
 (in-ns 'clj-ml-wkg/aimes-house-prices)
+
+;;Get past some dependency conflict
+
+(def ds (load-dataset))
 
 ;;Either load initial results
 (def gs-results (io/get-nippy "file://aimes-initial-results.nippy"))
@@ -44,8 +48,8 @@ lein repl
 	 results->accuracy-dataset
 	 (sort-by :average-loss)
 	 (take 10))
-	 
-	 
+
+
 ```
 
 There is no real dataset engineering past what I had to do to get things to load.  It is interesting

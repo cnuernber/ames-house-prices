@@ -7,6 +7,6 @@
                  [techascent/tech.xgboost "4.4"]
                  [techascent/tech.smile "3.5"]
                  [techascent/tech.svm "2.0"]
-                 [techascent/tech.ml-base "3.5-SNAPSHOT"]
+                 [techascent/tech.ml-base "3.5"]
                  [tech.tablesaw/tablesaw-core "0.30.2"]
                  [metasoarous/oz "1.5.2"]])
