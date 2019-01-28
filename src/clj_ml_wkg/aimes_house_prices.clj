@@ -307,6 +307,30 @@
     retval))
 
 
+(defn set-string-table
+  ^StringColumn [^StringColumn column str-table]
+  (when-not (= (column->unique-set column)
+               (set (keys str-table)))
+    (throw (ex-info "String table keys existing unique set mismatch"
+                    {:str-table-keys (set (keys str-table))
+                     :column-unique-set (column->unique-set column)})))
+  (let [new-str-table (StringColumn/create (.name column))]
+    ;;uggh.  Create the appropriate type for the size of the unique-set
+    ;;and build the forward/reverse mappings.
+    ;;Then set all the values and you should have it.
+    )
+
+  )
+
+
+
+;; Tech datasets are essentially row store.
+;; Coalesced datasets are dense vectors of data
+;; There is a tension here between the column store and row store format
+;; that is deeper than I was thinking.  For training, row store makes sense
+;; but in my experience data coming in from an API is a sequence of maps and ths
+;; you really want some abstraction where you can define some pipeline that applies
+;; to either.
 (defn ->tech-ml-dataset
   [{:keys [label-map] :as options} dataset]
   (let [column-map (->> (->column-seq dataset)
@@ -426,7 +450,8 @@
   []
   (do-gridsearch [{:model-type :xgboost/regression}
                   {:model-type :smile.regression/lasso}
-                  {:model-type :smile.regression/ordinary-least-squares}
+                  {:model-type :smile.regression/ridge}
+                  {:model-type :smile.regression/elastic-net}
                   {:model-type :libsvm/regression}]
                  :aimes-initial))
 
