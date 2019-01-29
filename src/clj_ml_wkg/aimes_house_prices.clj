@@ -18,6 +18,7 @@
             NumericColumn DoubleColumn
             StringColumn BooleanColumn]
            [tech.tablesaw.columns Column]
+           [tech.tablesaw.columns.strings ByteDictionaryMap ShortDictionaryMap IntDictionaryMap]
            [tech.tablesaw.io.csv CsvReadOptions]
            [java.util UUID]))
 
@@ -307,6 +308,63 @@
     retval))
 
 
+(defn get-field
+  [item field-name]
+  (let [field (doto (.getDeclaredField ^Class (type item) (str field-name))
+                (.setAccessible true))]
+    (.get field item)))
+
+(defn set-field!
+  [item field-name value]
+  (let [field (doto (.getDeclaredField ^Class (type item) (str field-name))
+                (.setAccessible true))]
+    (.set field item value)))
+
+(defn construct
+  [^Class item-cls & arglist]
+  (let [constructor (doto (.getDeclaredConstructor item-cls
+                                                   (into-array ^Class (map type arglist)))
+                      (.setAccessible true))]
+    (.newInstance constructor (into-array ^Object arglist))))
+
+
+(defn- v->b
+  ^it.unimi.dsi.fastutil.objects.Object2ByteOpenHashMap [item] item)
+
+(defn- b->v
+  ^it.unimi.dsi.fastutil.bytes.Byte2ObjectOpenHashMap [item] item)
+
+
+(defn- v->s
+  ^it.unimi.dsi.fastutil.objects.Object2ShortOpenHashMap [item] item)
+
+(defn- s->v
+  ^it.unimi.dsi.fastutil.shorts.Short2ObjectOpenHashMap [item] item)
+
+
+(defn- v->i
+  ^it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap [item] item)
+
+(defn- i->v
+  ^it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap [item] item)
+
+
+
+
+(defmacro ^:private set-table-values!
+  [new-table key-cast-fn v->k-cast-fn k->v-cast-fn item-map]
+  `(let [new-table# ~new-table
+         item-map# (->> ~item-map
+                        (map (fn [[k# v#]]
+                               [k# (~key-cast-fn v#)]))
+                        (into {}))
+         key->value# (~k->v-cast-fn (get-field ~new-table "keyToValue"))
+         value->key# (~v->k-cast-fn (get-field ~new-table "valueToKey"))]
+     (.putAll value->key# item-map#)
+     (.putAll key->value# (c-set/map-invert item-map#))
+     new-table#))
+
+
 (defn set-string-table
   ^StringColumn [^StringColumn column str-table]
   (when-not (= (column->unique-set column)
@@ -314,13 +372,30 @@
     (throw (ex-info "String table keys existing unique set mismatch"
                     {:str-table-keys (set (keys str-table))
                      :column-unique-set (column->unique-set column)})))
-  (let [new-str-table (StringColumn/create (.name column))]
-    ;;uggh.  Create the appropriate type for the size of the unique-set
-    ;;and build the forward/reverse mappings.
-    ;;Then set all the values and you should have it.
-    )
+  ;;uggh.  Create the appropriate type for the size of the unique-set
+  ;;and build the forward/reverse mappings.
+  ;;Then set all the values and you should have it.
 
-  )
+  (let [old-table (get-field column "lookupTable")
+        new-str-column (StringColumn/create (.name column))
+        ^ByteDictionaryMap new-table (get-field new-str-column "lookupTable")
+
+        new-table
+        (cond
+          (instance? ByteDictionaryMap old-table)
+          (set-table-values! new-table byte v->b b->v str-table)
+          (instance? ShortDictionaryMap old-table)
+          (set-table-values! (construct ShortDictionaryMap new-table)
+                             short v->s s->v str-table)
+          (instance? IntDictionaryMap old-table)
+          (set-table-values! (construct IntDictionaryMap new-table)
+                             int v->i i->v str-table))
+        ^"[Ljava.lang.String;" old-values (.asObjectArray column)
+        n-values (alength old-values)]
+    (set-field! new-str-column "lookupTable" new-table)
+    (c-for [idx 0 (< idx n-values) (inc idx)]
+           (.append new-str-column ^String (aget old-values idx)))
+    new-str-column))
 
 
 
