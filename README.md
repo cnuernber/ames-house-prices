@@ -12,7 +12,7 @@ scripts/get-data.sh
 The data is under data/aimes-house-prices
 
 
-Make sure you have openblas/atlas isntalled as well as libsvm.
+Make sure you have openblas or atlas installed as well as libsvm.
 
 If SVM doesn't work just remove it from the gridsearch pathways.  It is an old C
 library that can be temperamental.  From ubuntu it works fine on jvm 8.
