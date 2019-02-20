@@ -2,7 +2,7 @@
 
 Exploration of kaggle ames house prices comp.
 
-## Usage
+## Usage (Out of Date - get changelist 82aa05fc) 
 
 From top level directory:
 ```
