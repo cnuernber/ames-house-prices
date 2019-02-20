@@ -1,6 +1,6 @@
-# aimes-house-prices
+# ames-house-prices
 
-Exploration of kaggle aimes house prices comp.
+Exploration of kaggle ames house prices comp.
 
 ## Usage
 
@@ -9,7 +9,7 @@ From top level directory:
 scripts/get-data.sh
 ```
 
-The data is under data/aimes-house-prices
+The data is under data/ames-house-prices
 
 
 Make sure you have openblas or atlas installed as well as libsvm.
@@ -23,17 +23,17 @@ There is some dependency conflict with the csv subsystem tablesaw so from here i
 ```clojure
 lein repl
 
-;;load the aimes namespace
-(require '[clj-ml-wkg/aimes-house-prices])
+;;load the ames namespace
+(require '[clj-ml-wkg/ames-house-prices])
 
-(in-ns 'clj-ml-wkg/aimes-house-prices)
+(in-ns 'clj-ml-wkg/ames-house-prices)
 
 ;;Get past some dependency conflict
 
 (def ds (load-dataset))
 
 ;;Either load initial results
-(def gs-results (io/get-nippy "file://aimes-initial-results.nippy"))
+(def gs-results (io/get-nippy "file://ames-initial-results.nippy"))
 
 ;;Or train
 (def gs-result (gridsearch-the-things))

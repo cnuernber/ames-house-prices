@@ -1,4 +1,4 @@
-(ns clj-ml-wkg.aimes-house-prices
+(ns clj-ml-wkg.ames-house-prices
   (:require [tech.io :as io]
             [camel-snake-kebab.core :refer [->kebab-case]]
             [tech.parallel :as parallel]
@@ -45,7 +45,7 @@
 
 (def load-dataset
   (memoize
-   #(->table "data/aimes-house-prices/train.csv")))
+   #(->table "data/ames-house-prices/train.csv")))
 
 
 (defn ->column-seq
@@ -181,7 +181,7 @@
            dataset))
 
 
-(defn load-aimes-dataset
+(defn load-ames-dataset
   []
   (->> (load-dataset)
        (update-strings #(if (= "" %)
@@ -211,7 +211,7 @@
                     {:columns (set (keys column-map))}))))
 
 
-(def aimes-column-names #{"PoolQC"
+(def ames-column-names #{"PoolQC"
                           "Heating"
                           "TotalBsmtSF"
                           "HouseStyle"
@@ -294,7 +294,7 @@
                           "OverallQual"})
 
 
-(def feature-names (c-set/difference aimes-column-names #{"Id" "SalePrice"}))
+(def feature-names (c-set/difference ames-column-names #{"Id" "SalePrice"}))
 
 (def label-name "SalePrice")
 
@@ -427,7 +427,7 @@
 (defn do-gridsearch
   [base-systems result-name]
   (let [{options :options
-         dataset :coalesced-dataset} (->> (load-aimes-dataset)
+         dataset :coalesced-dataset} (->> (load-ames-dataset)
                                           (->tech-ml-dataset {:range-map {::dataset/features [-1 1]}}))
         keyset (set (keys (first dataset)))
         feature-keys (disj keyset :Purchase)
@@ -453,7 +453,7 @@
                   {:model-type :smile.regression/ridge}
                   {:model-type :smile.regression/elastic-net}
                   {:model-type :libsvm/regression}]
-                 :aimes-initial))
+                 :ames-initial))
 
 (defn results->accuracy-dataset
   [gridsearch-results]
@@ -467,7 +467,7 @@
 (defn accuracy-graphs
   [gridsearch-results]
   (->> [:div
-        [:h1 "aimes-initial"]
+        [:h1 "ames-initial"]
         [:vega-lite {:repeat {:column [:predict-time :train-time]}
                      :spec {:data {:values (results->accuracy-dataset gridsearch-results)}
                             :mark :point
