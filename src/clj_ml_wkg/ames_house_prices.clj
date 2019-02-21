@@ -1,5 +1,9 @@
 (ns clj-ml-wkg.ames-house-prices
   (:require [tech.ml.dataset.etl :as etl]
+            [tech.ml.dataset.etl.pipeline-operators :as pipe-ops]
+            [tech.ml.dataset.etl.math-ops :as pipe-math]
+            [tech.ml.dataset.etl.column-filters :as col-filters]
+            [tech.ml.dataset :as dataset]
             [tech.ml :as ml]
             [tech.ml.loss :as loss]
             [tech.ml.utils :as ml-utils]
@@ -13,15 +17,36 @@
             [tech.libs.svm]
 
             ;;put/get nippy
-            [tech.io :as io]))
+            [tech.io :as io]
+
+            [oz.core :as oz]
+
+            [clojure.pprint :as pp])
+
+  (:import [tech.ml.protocols.etl PETLSingleColumnOperator]))
 
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
 
+;; Define a pipeline operator that has never been seen before
+(pipe-ops/register-etl-operator!
+ :my-fancy-filter
+ (reify PETLSingleColumnOperator
+   (build-etl-context [op dataset column-name op-args]
+     {})
+   (perform-etl [op dataset column-name op-args context]
+     (let [less-than-num (double (first op-args))]
+       (dataset/ds-filter #(< (double (get % "GrLivArea"))
+                              less-than-num)
+                          dataset
+                          ["GrLivArea"])))))
+
+
 (def full-ames-pt-1
   '[[remove "Id"]
+    [my-fancy-filter "GrLivArea" 4000]
     ;;Replace missing values or just empty csv values with NA
     [replace-missing string? "NA"]
     [replace-string string? "" "NA"]
@@ -183,9 +208,16 @@
                                dataset
                                loss/rmse))
                      vec)]
-    (io/put-nippy! "file://ames-results.nippy"
+    (io/put-nippy! "file://ames-gridsearch-results.nippy"
                    results)
     results))
+
+
+(def load-results
+  (memoize
+   (fn
+     []
+     (io/get-nippy "file://ames-gridsearch-results.nippy"))))
 
 
 (defn results->accuracy-dataset
@@ -198,21 +230,238 @@
                :train-time train-time}))))
 
 
-(comment
-  (defn accuracy-graphs
-    [gridsearch-results]
+(def initial-pipeline-from-article
+  '[[remove "Id"]
+    [my-fancy-filter "GrLivArea" 4000]
+    [m= "SalePrice" (log1p (col))]])
+
+
+;; Impressive patience!!
+(def initial-missing-entries
+  '[
+    ;; Handle missing values for features where median/mean or most common value doesn't
+    ;; make sense
+
+    ;; Alley : data description says NA means "no alley access"
+    [replace-missing "Alley" "None"]
+    ;; BedroomAbvGr : NA most likely means 0
+    [replace-missing ["BedroomAbvGr"
+                      "BsmtFullBath"
+                      "BsmtHalfBath"
+                      "BsmtUnfSF"
+                      "EnclosedPorch"
+                      "Fireplaces"
+                      "GarageArea"
+                      "GarageCars"
+                      "HalfBath"
+                      ;; KitchenAbvGr : NA most likely means 0
+                      "KitchenAbvGr"
+                      "LotFrontage"
+                      "MasVnrArea"
+                      "MiscVal"
+                      ;; OpenPorchSF : NA most likely means no open porch
+                      "OpenPorchSF"
+                      "PoolArea"
+                      ;; ScreenPorch : NA most likely means no screen porch
+                      "ScreenPorch"
+                      ;; TotRmsAbvGrd : NA most likely means 0
+                      "TotRmsAbvGrd"
+                      ;; WoodDeckSF : NA most likely means no wood deck
+                      "WoodDeckSF"
+                      ]
+     0]
+    ;; BsmtQual etc : data description says NA for basement features is "no basement"
+    [replace-missing ["BsmtQual"
+                      "BsmtCond"
+                      "BsmtExposure"
+                      "BsmtFinType1"
+                      "BsmtFinType2"
+                      ;; Fence : data description says NA means "no fence"
+                      "Fence"
+                      ;; FireplaceQu : data description says NA means "no fireplace"
+                      "FireplaceQu"
+                      ;; GarageType etc : data description says NA for garage features
+                      ;; is "no garage"
+                      "GarageType"
+                      "GarageFinish"
+                      "GarageQual"
+                      "GarageCond"
+                      ;; MiscFeature : data description says NA means "no misc feature"
+                      "MiscFeature"
+                      ;; PoolQC : data description says NA means "no pool"
+                      "PoolQC"
+                      ]
+     "No"]
+    [replace-missing "CentralAir" "N"]
+    [replace-missing ["Condition1"
+                      "Condition2"]
+     "Norm"]
+    ;; Condition : NA most likely means Normal
+    ;; EnclosedPorch : NA most likely means no enclosed porch
+    ;; External stuff : NA most likely means average
+    [replace-missing ["ExterCond"
+                      "ExterQual"
+                      ;; HeatingQC : NA most likely means typical
+                      "HeatingQC"
+                      ;; KitchenQual : NA most likely means typical
+                      "KitchenQual"
+                      ]
+     "TA"]
+    ;; Functional : data description says NA means typical
+    [replace-missing "Functional" "Typ"]
+    ;; LotShape : NA most likely means regular
+    [replace-missing "LotShape" "Reg"]
+    ;; MasVnrType : NA most likely means no veneer
+    [replace-missing "MasVnrType" "None"]
+    ;; PavedDrive : NA most likely means not paved
+    [replace-missing "PavedDrive" "N"]
+    [replace-missing "SaleCondition" "Normal"]
+    [replace-missing "Utilities" "AllPub"]])
+
+
+(def more-categorical
+  '[[set-attribute ["MSSubClass" "OverallQual" "OverallCond"] :categorical? true]])
+
+
+;; Encode some categorical features as ordered numbers when there is information in the
+;; order.
+(def str->number-initial-map
+  {
+   "Alley"  {"Grvl"  1 "Pave" 2 "None" 0}
+   "BsmtCond"  {"No"  0 "Po"  1 "Fa"  2 "TA"  3 "Gd"  4 "Ex"  5}
+   "BsmtExposure"  {"No"  0 "Mn"  1 "Av" 2 "Gd"  3}
+   "BsmtFinType1"  {"No"  0 "Unf"  1 "LwQ" 2 "Rec"  3 "BLQ"  4
+                     "ALQ"  5 "GLQ"  6}
+   "BsmtFinType2"  {"No"  0 "Unf"  1 "LwQ" 2 "Rec"  3 "BLQ"  4
+                     "ALQ"  5 "GLQ"  6}
+   "BsmtQual"  {"No"  0 "Po"  1 "Fa"  2 "TA" 3 "Gd"  4 "Ex"  5}
+   "ExterCond"  {"Po"  1 "Fa"  2 "TA" 3 "Gd" 4 "Ex"  5}
+   "ExterQual"  {"Po"  1 "Fa"  2 "TA" 3 "Gd" 4 "Ex"  5}
+   "FireplaceQu"  {"No"  0 "Po"  1 "Fa"  2 "TA"  3 "Gd"  4 "Ex"  5}
+   "Functional"  {"Sal"  1 "Sev"  2 "Maj2"  3 "Maj1"  4 "Mod" 5
+                   "Min2"  6 "Min1"  7 "Typ"  8}
+   "GarageCond"  {"No"  0 "Po"  1 "Fa"  2 "TA"  3 "Gd"  4 "Ex"  5}
+   "GarageQual"  {"No"  0 "Po"  1 "Fa"  2 "TA"  3 "Gd"  4 "Ex"  5}
+   "HeatingQC"  {"Po"  1 "Fa"  2 "TA"  3 "Gd"  4 "Ex"  5}
+   "KitchenQual"  {"Po"  1 "Fa"  2 "TA"  3 "Gd"  4 "Ex"  5}
+   "LandSlope"  {"Sev"  1 "Mod"  2 "Gtl"  3}
+   "LotShape"  {"IR3"  1 "IR2"  2 "IR1"  3 "Reg"  4}
+   "PavedDrive"  {"N"  0 "P"  1 "Y"  2}
+   "PoolQC"  {"No"  0 "Fa"  1 "TA"  2 "Gd"  3 "Ex"  4}
+   "Street"  {"Grvl"  1 "Pave"  2}
+   "Utilities"  {"ELO"  1 "NoSeWa"  2 "NoSewr"  3 "AllPub"  4}
+   })
+
+
+(def str->number-pipeline
+  (->> str->number-initial-map
+       (map (fn [[k v-map]]
+              ['string->number k v-map]))))
+
+
+(defn pp-str
+  [ds]
+  (with-out-str
+    (pp/pprint ds)))
+
+
+(defn presentation
+  []
+  (let [src-dataset (tablesaw/path->tablesaw-dataset
+                     "data/ames-house-prices/train.csv")
+        outliers-graph
+        [:vega-lite {:data {:values
+                            (-> src-dataset
+                                (dataset/select ["SalePrice" "GrLivArea"] :all)
+                                (dataset/->flyweight))}
+                     :mark :point
+                     :encoding {:y {:field "SalePrice"
+                                    :type :quantitative}
+                                :x {:field "GrLivArea"
+                                    :type :quantitative}}}]
+        filtered-ds (-> (etl/apply-pipeline src-dataset
+                                            '[[my-fancy-filter "GrLivArea" 4000]]
+                                            {})
+                        :dataset)
+        fixed-outlier-graph
+        [:vega-lite {:data {:values
+                            (-> filtered-ds
+                                (dataset/select ["SalePrice" "GrLivArea"] :all)
+                                (dataset/->flyweight))}
+                     :mark :point
+                     :encoding {:y {:field "SalePrice"
+                                    :type :quantitative}
+                                :x {:field "GrLivArea"
+                                    :type :quantitative}}}]
+        after-categorical (-> (etl/apply-pipeline src-dataset
+                                                  (concat initial-pipeline-from-article
+                                                          more-categorical)
+                                                  {})
+                              :dataset)
+        missing-ds-1 (-> (etl/apply-pipeline src-dataset
+                                             (concat initial-pipeline-from-article
+                                                     more-categorical
+                                                     initial-missing-entries)
+                                             {})
+                         :dataset)
+
+        str->num-1-data (etl/apply-pipeline src-dataset
+                                            (concat initial-pipeline-from-article
+                                                    more-categorical
+                                                    initial-missing-entries
+                                                    str->number-pipeline)
+                                            {})]
     (->> [:div
-          [:h1 "ames-initial"]
-          [:vega-lite {:repeat {:column [:predict-time :train-time]}
-                       :spec {:data {:values (results->accuracy-dataset
-                                              gridsearch-results)}
-                              :mark :point
-                              :encoding {:y {:field :average-loss
-                                             :type :quantitative}
-                                         :x {:field {:repeat :column}
-                                             :type :quantitative}
-                                         :color {:field :model-name
-                                                 :type :nominal}
-                                         :shape {:field :model-name
-                                                 :type :nominal}}}}]]
+          [:h1 "Ames House Prices"]
+          [:div
+           [:h3 "Outliers"]
+           [:p "First we note that there are several dataset outliers"]
+           outliers-graph
+           [:p "We then fix this with a simple pipeline operation: "
+            [:pre (pr-str initial-pipeline-from-article)]]
+           fixed-outlier-graph]
+          [:div
+           [:h3 "Categorical Fixes"]
+           [:p "Whether columns are categorical is defined by attributes:"]
+           [:p "Pre-fix:"
+            [:pre (pp-str (col-filters/execute-column-filter
+                           src-dataset 'categorical?))]]
+           [:p "The fix is simple:"
+            [:pre (pp-str more-categorical)]]
+           [:p "Post-fix:"
+            [:pre (pp-str (col-filters/execute-column-filter
+                           after-categorical 'categorical?))]]]
+          [:div
+           [:h3 "Missing #1"]
+           [:p "Initial missing columns:"
+            [:pre
+             (pp-str
+               (dataset/columns-with-missing-seq filtered-ds))]]
+           [:p "Adding in pipeline ops:"
+            [:pre (pp-str initial-missing-entries)]]
+           [:p "After initial missing fixes"
+            [:pre
+             (pp-str (dataset/columns-with-missing-seq missing-ds-1))]]]
+          [:div
+           [:h3 "string->number"]
+           [:p "String->number is flexible and remembers what it did for reverse
+mapping and inference.  Pipeline:"
+            [:pre (pp-str str->number-pipeline)]]
+           [:p "The options map returned contains the 'label-map'.  This is used
+throughout the system in order to map values both ways so we can always recover
+the original string value."
+            [:pre (pp-str (select-keys (:options str->num-1-data) [:label-map]))]]]
+
+          [:h3 "Overall Gridsearch Results"]
+          [:vega-lite {:data {:values (results->accuracy-dataset
+                                       (load-results))}
+                       :mark :point
+                       :encoding {:y {:field :average-loss
+                                      :type :quantitative}
+                                  :x {:field :model-name
+                                      :type :nominal}
+                                  :color {:field :model-name
+                                          :type :nominal}
+                                  :shape {:field :model-name
+                                          :type :nominal}}}]]
          oz/view!)))

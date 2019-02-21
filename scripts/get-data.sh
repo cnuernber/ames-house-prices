@@ -16,3 +16,6 @@ chmod 644 *
 popd
 
 popd
+
+
+wget https://s3.us-east-2.amazonaws.com/tech.public.data/ames-gridsearch-results.nippy

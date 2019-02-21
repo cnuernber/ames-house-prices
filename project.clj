@@ -5,5 +5,4 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.9.0"]
                  [techascent/tech.ml "0.12"]
-                 ;; [metasoarous/oz "1.5.2"]
-                 ])
+                 [metasoarous/oz "1.5.2"]])
