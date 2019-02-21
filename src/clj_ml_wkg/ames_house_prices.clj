@@ -1,9 +1,14 @@
 (ns clj-ml-wkg.ames-house-prices
+  "See reference article:
+  https://www.kaggle.com/juliencs/a-study-on-regression-applied-to-the-ames-dataset
+
+  This is very much a work in progress."
   (:require [tech.ml.dataset.etl :as etl]
             [tech.ml.dataset.etl.pipeline-operators :as pipe-ops]
             [tech.ml.dataset.etl.math-ops :as pipe-math]
             [tech.ml.dataset.etl.column-filters :as col-filters]
             [tech.ml.dataset :as dataset]
+            [tech.ml.dataset.column :as ds-col]
             [tech.ml :as ml]
             [tech.ml.loss :as loss]
             [tech.ml.utils :as ml-utils]
@@ -30,23 +35,9 @@
 (set! *unchecked-math* :warn-on-boxed)
 
 
-;; Define a pipeline operator that has never been seen before
-(pipe-ops/register-etl-operator!
- :my-fancy-filter
- (reify PETLSingleColumnOperator
-   (build-etl-context [op dataset column-name op-args]
-     {})
-   (perform-etl [op dataset column-name op-args context]
-     (let [less-than-num (double (first op-args))]
-       (dataset/ds-filter #(< (double (get % "GrLivArea"))
-                              less-than-num)
-                          dataset
-                          ["GrLivArea"])))))
-
 
 (def full-ames-pt-1
   '[[remove "Id"]
-    [my-fancy-filter "GrLivArea" 4000]
     ;;Replace missing values or just empty csv values with NA
     [replace-missing string? "NA"]
     [replace-string string? "" "NA"]
@@ -232,7 +223,6 @@
 
 (def initial-pipeline-from-article
   '[[remove "Id"]
-    [my-fancy-filter "GrLivArea" 4000]
     [m= "SalePrice" (log1p (col))]])
 
 
@@ -359,6 +349,80 @@
               ['string->number k v-map]))))
 
 
+(def replace-maps
+  {
+   ;; Create new features
+   ;; 1* Simplifications of existing features
+   "SimplOverallQual" {"OverallQual" {1  1, 2  1, 3  1, ;; bad
+                                     4  2, 5  2, 6  2, ;; average
+                                     7  3, 8  3, 9  3, 10  3 ;; good
+                                      }}
+   "SimplOverallCond" {"OverallCond" {1  1, 2  1, 3  1,       ;; bad
+                                      4  2, 5  2, 6  2,       ;; average
+                                      7  3, 8  3, 9  3, 10  3 ;; good
+                                      }}
+   "SimplPoolQC" {"PoolQC" {1  1, 2  1,    ;; average
+                            3  2, 4  2     ;; good
+                            }}
+   "SimplGarageCond" {"GarageCond" {1  1,             ;; bad
+                                    2  1, 3  1,       ;; average
+                                    4  2, 5  2        ;; good
+                                    }}
+   "SimplGarageQual" {"GarageQual" {1  1,             ;; bad
+                                    2  1, 3  1,       ;; average
+                                    4  2, 5  2        ;; good
+                                    }}
+   "SimplFireplaceQu"  {"FireplaceQu" {1  1,           ;; bad
+                                        2  1, 3  1,     ;; average
+                                        4  2, 5  2      ;; good
+                                        }}
+   "SimplFunctional"  {"Functional" {1  1, 2  1,           ;; bad
+                                      3  2, 4  2,           ;; major
+                                      5  3, 6  3, 7  3,     ;; minor
+                                      8  4                  ;; typical
+                                      }}
+   "SimplKitchenQual" {"KitchenQual" {1  1,             ;; bad
+                                      2  1, 3  1,       ;; average
+                                      4  2, 5  2        ;; good
+                                      }}
+   "SimplHeatingQC"  {"HeatingQC" {1  1,           ;; bad
+                                   2  1, 3  1,     ;; average
+                                   4  2, 5  2      ;; good
+                                    }}
+   "SimplBsmtFinType1"  {"BsmtFinType1" {1  1,         ;; unfinished
+                                         2  1, 3  1,   ;; rec room
+                                         4  2, 5  2, 6  2 ;; living quarters
+                                          }}
+   "SimplBsmtFinType2" {"BsmtFinType2" {1 1,           ;; unfinished
+                                        2 1, 3 1,      ;; rec room
+                                        4 2, 5 2, 6 2  ;; living quarters
+                                        }}
+   "SimplBsmtCond" {"BsmtCond" {1 1,    ;; bad
+                                2 1, 3 1, ;; average
+                                4 2, 5 2  ;; good
+                                }}
+   "SimplBsmtQual" {"BsmtQual" {1 1,      ;; bad
+                                2 1, 3 1, ;; average
+                                4 2, 5 2  ;; good
+                                }}
+   "SimplExterCond" {"ExterCond" {1 1,      ;; bad
+                                  2 1, 3 1, ;; average
+                                  4 2, 5 2  ;; good
+                                  }}
+   "SimplExterQual" {"ExterQual" {1 1,      ;; bad
+                                  2 1, 3 1, ;; average
+                                  4 2, 5 2  ;; good
+                                  }}
+   })
+
+
+(def simplifications
+  (->> replace-maps
+       (mapv (fn [[k v-map]]
+               (let [[src-name replace-data] (first v-map)]
+                 ['m= k ['replace ['col src-name] replace-data]])))))
+
+
 (defn pp-str
   [ds]
   (with-out-str
@@ -379,10 +443,7 @@
                                     :type :quantitative}
                                 :x {:field "GrLivArea"
                                     :type :quantitative}}}]
-        filtered-ds (-> (etl/apply-pipeline src-dataset
-                                            '[[my-fancy-filter "GrLivArea" 4000]]
-                                            {})
-                        :dataset)
+        filtered-ds (pipe-ops/filter src-dataset "GrLivArea" '(< (col) 4000))
         fixed-outlier-graph
         [:vega-lite {:data {:values
                             (-> filtered-ds
@@ -393,24 +454,33 @@
                                     :type :quantitative}
                                 :x {:field "GrLivArea"
                                     :type :quantitative}}}]
-        after-categorical (-> (etl/apply-pipeline src-dataset
+        after-categorical (-> (etl/apply-pipeline filtered-ds
                                                   (concat initial-pipeline-from-article
                                                           more-categorical)
                                                   {})
                               :dataset)
-        missing-ds-1 (-> (etl/apply-pipeline src-dataset
+        missing-ds-1 (-> (etl/apply-pipeline filtered-ds
                                              (concat initial-pipeline-from-article
                                                      more-categorical
                                                      initial-missing-entries)
                                              {})
                          :dataset)
 
-        str->num-1-data (etl/apply-pipeline src-dataset
+        str->num-1-data (etl/apply-pipeline filtered-ds
                                             (concat initial-pipeline-from-article
                                                     more-categorical
                                                     initial-missing-entries
                                                     str->number-pipeline)
-                                            {})]
+                                            {})
+
+        simplified-data (-> (etl/apply-pipeline filtered-ds
+                                                (concat initial-pipeline-from-article
+                                                        more-categorical
+                                                        initial-missing-entries
+                                                        str->number-pipeline
+                                                        simplifications)
+                                                {})
+                            :dataset)]
     (->> [:div
           [:h1 "Ames House Prices"]
           [:div
@@ -451,6 +521,22 @@ mapping and inference.  Pipeline:"
 throughout the system in order to map values both ways so we can always recover
 the original string value."
             [:pre (pp-str (select-keys (:options str->num-1-data) [:label-map]))]]]
+
+          [:div
+           [:h3 "Simplified data"]
+           [:p "The math system has a special function replace which takes a column
+and a map and returns a new column."
+            [:pre (pp-str '(-> (dataset/column simplified-data "KitchenQual")
+                               (ds-col/unique)))]
+            [:pre (pp-str (-> (dataset/column simplified-data "KitchenQual")
+                              (ds-col/unique)))]]
+           [:p "We run a math expression and place result into new column"
+            [:pre (pp-str (first simplifications))]]
+           [:p "This results (in this case) in a column with fewer values."
+            [:pre (pp-str '(-> (dataset/column simplified-data "SimplKitchenQual")
+                               (ds-col/unique)))]
+            [:pre (pp-str (-> (dataset/column simplified-data "SimplKitchenQual")
+                              (ds-col/unique)))]]]
 
           [:h3 "Overall Gridsearch Results"]
           [:vega-lite {:data {:values (results->accuracy-dataset
