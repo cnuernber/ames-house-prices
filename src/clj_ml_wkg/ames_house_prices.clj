@@ -523,7 +523,7 @@ the original string value."
             [:pre (pp-str (select-keys (:options str->num-1-data) [:label-map]))]]]
 
           [:div
-           [:h3 "Simplified data"]
+           [:h3 "simplified data"]
            [:p "The math system has a special function replace which takes a column
 and a map and returns a new column."
             [:pre (pp-str '(-> (dataset/column simplified-data "KitchenQual")
