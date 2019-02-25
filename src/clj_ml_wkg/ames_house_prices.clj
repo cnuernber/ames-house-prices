@@ -36,119 +36,6 @@
 
 
 
-(def full-ames-pt-1
-  '[[remove "Id"]
-    ;;Replace missing values or just empty csv values with NA
-    [replace-missing string? "NA"]
-    [replace-string string? "" "NA"]
-    [replace-missing numeric? 0]
-    [replace-missing boolean? false]
-    [->etl-datatype [or numeric? boolean?]]
-    [string->number "Utilities" [["NA" -1] "ELO" "NoSeWa" "NoSewr" "AllPub"]]
-    [string->number "LandSlope" ["Gtl" "Mod" "Sev" "NA"]]
-    [string->number ["ExterQual"
-                     "ExterCond"
-                     "BsmtQual"
-                     "BsmtCond"
-                     "HeatingQC"
-                     "KitchenQual"
-                     "FireplaceQu"
-                     "GarageQual"
-                     "GarageCond"
-                     "PoolQC"]   ["NA" "Po" "Fa" "TA" "Gd" "Ex"]]
-    [set-attribute ["MSSubClass" "OverallQual" "OverallCond"] :categorical? true]
-    [string->number "MasVnrType" {"BrkCmn" 1
-                                 "BrkFace" 1
-                                 "CBlock" 1
-                                 "Stone" 1
-                                 "None" 0
-                                 "NA" -1}]
-    [string->number "SaleCondition" {"Abnorml" 0
-                                     "Alloca" 0
-                                     "AdjLand" 0
-                                     "Family" 0
-                                     "Normal" 0
-                                     "Partial" 1
-                                     "NA" -1}]
-    ;;Auto convert the rest that are still string columns
-    [string->number string?]
-    [m= "SalePrice" (log1p (col "SalePrice"))]
-    [m= "OverallGrade" (* (col "OverallQual") (col "OverallCond"))]
-    ;; Overall quality of the garage
-    [m= "GarageGrade"  (* (col "GarageQual") (col "GarageCond"))]
-    ;; Overall quality of the exterior
-    [m= "ExterGrade" (* (col "ExterQual") (col "ExterCond"))]
-    ;; Overall kitchen score
-    [m= "KitchenScore" (* (col "KitchenAbvGr") (col "KitchenQual"))]
-    ;; Overall fireplace score
-    [m= "FireplaceScore" (* (col "Fireplaces") (col "FireplaceQu"))]
-    ;; Overall garage score
-    [m= "GarageScore" (* (col "GarageArea") (col "GarageQual"))]
-    ;; Overall pool score
-    [m= "PoolScore" (* (col "PoolArea") (col "PoolQC"))]
-    ;; Simplified overall quality of the house
-    [m= "SimplOverallGrade" (* (col "OverallQual") (col "OverallCond"))]
-    ;; Simplified overall quality of the exterior
-    [m= "SimplExterGrade" (* (col "ExterQual") (col "ExterCond"))]
-    ;; Simplified overall pool score
-    [m= "SimplPoolScore" (* (col "PoolArea") (col "PoolQC"))]
-    ;; Simplified overall garage score
-    [m= "SimplGarageScore" (* (col "GarageArea") (col "GarageQual"))]
-    ;; Simplified overall fireplace score
-    [m= "SimplFireplaceScore" (* (col "Fireplaces") (col "FireplaceQu"))]
-    ;; Simplified overall kitchen score
-    [m= "SimplKitchenScore" (* (col "KitchenAbvGr") (col "KitchenQual"))]
-    ;; Total number of bathrooms
-    [m= "TotalBath" (+ (col "BsmtFullBath")
-                       (* 0.5 (col "BsmtHalfBath"))
-                       (col "FullBath")
-                       (* 0.5 "HalfBath"))]
-    ;; Total SF for house (incl. basement)
-    [m= "AllSF" (+ (col "GrLivArea") (col "TotalBsmtSF"))]
-    ;; Total SF for 1st + 2nd floors
-    [m= "AllFlrsSF" (+ (col "1stFlrSF") (col "2ndFlrSF"))]
-    ;; Total SF for porch
-    [m= "AllPorchSF" (+ (col "OpenPorchSF") (col "EnclosedPorch")
-                        (col "3SsnPorch") (col "ScreenPorch"))]])
-
-;; Found after first step using dataset/correlation-table
-(def ames-top-columns ["SalePrice"
-                        "OverallQual"
-                        "AllSF"
-                        "AllFlrsSF"
-                        "GrLivArea"
-                        "GarageCars"
-                        "ExterQual"
-                        "KitchenQual"
-                        "GarageScore"
-                        "SimplGarageScore"
-                        "GarageArea"])
-
-
-(def full-ames-pt-2
-  ;;Drop SalePrice column of course.
-  (->> (rest ames-top-columns)
-       (mapcat (fn [colname]
-                 [['m= (str colname "-s2") ['** ['col colname] 2]]
-                  ['m= (str colname "-s3") ['** ['col colname] 3]]
-                  ['m= (str colname "-sqrt") ['sqrt ['col colname]]]]))
-       (concat full-ames-pt-1)
-       vec))
-
-
-(def full-ames-pt-3
-  (->> (concat full-ames-pt-2
-               '[[m= [and
-                      [not categorical?]
-                      [not target?]
-                      [> [abs [skew [col]]] 0.5]]
-                  (log1p (col))]
-
-                 [std-scaler [and
-                              [not categorical?]
-                              [not target?]]]])
-       (vec)))
-
 
 (defn gridsearch-model
   [dataset-name dataset loss-fn opts]
@@ -174,34 +61,34 @@
 
 
 
-(defn gridsearch-dataset
-  []
-  (let [base-systems [{:model-type :xgboost/regression}
-                      {:model-type :smile.regression/lasso}
-                      {:model-type :smile.regression/ridge}
-                      {:model-type :smile.regression/elastic-net}
-                      {:model-type :libsvm/regression}]
+;; (defn gridsearch-dataset
+;;   []
+;;   (let [base-systems [{:model-type :xgboost/regression}
+;;                       {:model-type :smile.regression/lasso}
+;;                       {:model-type :smile.regression/ridge}
+;;                       {:model-type :smile.regression/elastic-net}
+;;                       {:model-type :libsvm/regression}]
 
-        dataset-name :full-ames-pathway
+;;         dataset-name :full-ames-pathway
 
-        src-dataset (tablesaw/path->tablesaw-dataset
-                     "data/ames-house-prices/train.csv")
+;;         src-dataset (tablesaw/path->tablesaw-dataset
+;;                      "data/ames-house-prices/train.csv")
 
-        {:keys [dataset pipeline options]}
-        (etl/apply-pipeline src-dataset full-ames-pt-3
-                            {:target "SalePrice"})
+;;         {:keys [dataset pipeline options]}
+;;         (etl/apply-pipeline src-dataset full-ames-pt-3
+;;                             {:target "SalePrice"})
 
-        results (->> base-systems
-                     (map #(merge options %))
-                     (mapcat
-                      (partial gridsearch-model
-                               dataset-name
-                               dataset
-                               loss/rmse))
-                     vec)]
-    (io/put-nippy! "file://ames-gridsearch-results.nippy"
-                   results)
-    results))
+;;         results (->> base-systems
+;;                      (map #(merge options %))
+;;                      (mapcat
+;;                       (partial gridsearch-model
+;;                                dataset-name
+;;                                dataset
+;;                                loss/rmse))
+;;                      vec)]
+;;     (io/put-nippy! "file://ames-gridsearch-results.nippy"
+;;                    results)
+;;     results))
 
 
 (def load-results
@@ -223,6 +110,10 @@
 
 (def initial-pipeline-from-article
   '[[remove "Id"]
+    ;;Because we support many datatypes, for the math sections we have to cast to
+    ;;the same datatype.  We provide an operator for doing this:
+    [->etl-datatype (or (and numeric? (not int64?))
+                        boolean?)]
     [m= "SalePrice" (log1p (col))]])
 
 
@@ -423,6 +314,237 @@
                  ['m= k ['replace ['col src-name] replace-data]])))))
 
 
+(def linear-combinations
+  ;; 2* Combinations of existing features
+  ;; Overall quality of the house
+  '[
+    [m= "OverallGrade" (* (col "OverallQual") (col "OverallCond"))]
+    ;; Overall quality of the garage
+    [m= "GarageGrade" (* (col "GarageQual") (col "GarageCond"))]
+    ;; Overall quality of the exterior
+    [m= "ExterGrade"(* (col "ExterQual") (col "ExterCond"))]
+    ;; Overall kitchen score
+    [m= "KitchenScore" (* (col "KitchenAbvGr") (col "KitchenQual"))]
+    ;; Overall fireplace score
+    [m= "FireplaceScore" (* (col "Fireplaces") (col "FireplaceQu"))]
+    ;; Overall garage score
+    [m= "GarageScore" (* (col "GarageArea") (col "GarageQual"))]
+    ;; Overall pool score
+    [m= "PoolScore" (* (col "PoolArea") (col "PoolQC"))]
+    ;; Simplified overall quality of the house
+    [m= "SimplOverallGrade" (* (col "SimplOverallQual") (col "SimplOverallCond"))]
+    ;; Simplified overall quality of the exterior
+    [m= "SimplExterGrade" (* (col "SimplExterQual") (col "SimplExterCond"))]
+    ;; Simplified overall pool score
+    [m= "SimplPoolScore" (* (col "PoolArea") (col "SimplPoolQC"))]
+    ;; Simplified overall garage score
+    [m= "SimplGarageScore" (* (col "GarageArea") (col "SimplGarageQual"))]
+    ;; Simplified overall fireplace score
+    [m= "SimplFireplaceScore" (* (col "Fireplaces") (col "SimplFireplaceQu"))]
+    ;; Simplified overall kitchen score
+    [m= "SimplKitchenScore" (* (col "KitchenAbvGr" ) (col "SimplKitchenQual"))]
+    ;; Total number of bathrooms
+    [m= "TotalBath" (+ (col "BsmtFullBath") (* 0.5 (col "BsmtHalfBath"))
+                       (col "FullBath") (* 0.5 (col "HalfBath")))]
+    ;; Total SF for house (incl. basement)
+    [m= "AllSF"  (+ (col "GrLivArea") (col "TotalBsmtSF"))]
+    ;; Total SF for 1st + 2nd floors
+    [m= "AllFlrsSF" (+ (col "1stFlrSF") (col "2ndFlrSF"))]
+    ;; Total SF for porch
+    [m= "AllPorchSF" (+ (col "OpenPorchSF") (col "EnclosedPorch")
+                        (col "3SsnPorch") (col "ScreenPorch"))]
+    ;; Encode MasVrnType
+    [string->number "MasVnrType" ["None" "BrkCmn" "BrkFace" "CBlock" "Stone"]]
+    [m= "HasMasVnr" (not-eq (col "MasVnrType") 0)]
+    ;;Encode any further string fields so we can do correlation table
+    [string->number string?]
+    ]
+  )
+
+;;Check skew
+
+(def article-correlations
+  ;;Default for pandas is pearson.
+  ;;  Find most important features relative to target
+  {"SalePrice"            1.000
+   "OverallQual"          0.819
+   "AllSF"                0.817
+   "AllFlrsSF"            0.729
+   "GrLivArea"            0.719
+   "SimplOverallQual"     0.708
+   "ExterQual"            0.681
+   "GarageCars"           0.680
+   "TotalBath"            0.673
+   "KitchenQual"          0.667
+   "GarageScore"          0.657
+   "GarageArea"           0.655
+   "TotalBsmtSF"          0.642
+   "SimplExterQual"       0.636
+   "SimplGarageScore"     0.631
+   "BsmtQual"             0.615
+   "1stFlrSF"             0.614
+   "SimplKitchenQual"     0.610
+   "OverallGrade"         0.604
+   "SimplBsmtQual"        0.594
+   "FullBath"             0.591
+   "YearBuilt"            0.589
+   "ExterGrade"           0.587
+   "YearRemodAdd"         0.569
+   "FireplaceQu"          0.547
+   "GarageYrBlt"          0.544
+   "TotRmsAbvGrd"         0.533
+   "SimplOverallGrade"    0.527
+   "SimplKitchenScore"    0.523
+   "FireplaceScore"       0.518
+   "SimplBsmtCond"        0.204
+   "BedroomAbvGr"         0.204
+   "AllPorchSF"           0.199
+   "LotFrontage"          0.174
+   "SimplFunctional"      0.137
+   "Functional"           0.136
+   "ScreenPorch"          0.124
+   "SimplBsmtFinType2"    0.105
+   "Street"               0.058
+   "3SsnPorch"            0.056
+   "ExterCond"            0.051
+   "PoolArea"             0.041
+   "SimplPoolScore"       0.040
+   "SimplPoolQC"          0.040
+   "PoolScore"            0.040
+   "PoolQC"               0.038
+   "BsmtFinType2"         0.016
+   "Utilities"            0.013
+   "BsmtFinSF2"           0.006
+   "BsmtHalfBath"        -0.015
+   "MiscVal"             -0.020
+   "SimplOverallCond"    -0.028
+   "YrSold"              -0.034
+   "OverallCond"         -0.037
+   "LowQualFinSF"        -0.038
+   "LandSlope"           -0.040
+   "SimplExterCond"      -0.042
+   "KitchenAbvGr"        -0.148
+   "EnclosedPorch"       -0.149
+   "LotShape"            -0.286
+   }
+  )
+
+(def polynomial-combinations
+;;   # Create new features
+;; # 3* Polynomials on the top 10 existing features
+;; train["OverallQual-s2"] = train["OverallQual"] ** 2
+;; train["OverallQual-s3"] = train["OverallQual"] ** 3
+;; train["OverallQual-Sq"] = np.sqrt(train["OverallQual"])
+;; train["AllSF-2"] = train["AllSF"] ** 2
+;; train["AllSF-3"] = train["AllSF"] ** 3
+;; train["AllSF-Sq"] = np.sqrt(train["AllSF"])
+;; train["AllFlrsSF-2"] = train["AllFlrsSF"] ** 2
+;; train["AllFlrsSF-3"] = train["AllFlrsSF"] ** 3
+;; train["AllFlrsSF-Sq"] = np.sqrt(train["AllFlrsSF"])
+;; train["GrLivArea-2"] = train["GrLivArea"] ** 2
+;; train["GrLivArea-3"] = train["GrLivArea"] ** 3
+;; train["GrLivArea-Sq"] = np.sqrt(train["GrLivArea"])
+;; train["SimplOverallQual-s2"] = train["SimplOverallQual"] ** 2
+;; train["SimplOverallQual-s3"] = train["SimplOverallQual"] ** 3
+;; train["SimplOverallQual-Sq"] = np.sqrt(train["SimplOverallQual"])
+;; train["ExterQual-2"] = train["ExterQual"] ** 2
+;; train["ExterQual-3"] = train["ExterQual"] ** 3
+;; train["ExterQual-Sq"] = np.sqrt(train["ExterQual"])
+;; train["GarageCars-2"] = train["GarageCars"] ** 2
+;; train["GarageCars-3"] = train["GarageCars"] ** 3
+;; train["GarageCars-Sq"] = np.sqrt(train["GarageCars"])
+;; train["TotalBath-2"] = train["TotalBath"] ** 2
+;; train["TotalBath-3"] = train["TotalBath"] ** 3
+;; train["TotalBath-Sq"] = np.sqrt(train["TotalBath"])
+;; train["KitchenQual-2"] = train["KitchenQual"] ** 2
+;; train["KitchenQual-3"] = train["KitchenQual"] ** 3
+;; train["KitchenQual-Sq"] = np.sqrt(train["KitchenQual"])
+;; train["GarageScore-2"] = train["GarageScore"] ** 2
+;; train["GarageScore-3"] = train["GarageScore"] ** 3
+  ;;   train["GarageScore-Sq"] = np.sqrt(train["GarageScore"]))
+  )
+
+
+(def feature-type-counts
+  ;; Numerical features : 117
+  ;; Categorical features : 26
+  )
+
+
+(def initial-skew-count
+  ;; 86 skewed numerical features to log transform
+  )
+
+(def catgorical-missing
+  1)
+
+
+(def partition-dataset
+ ;;  # Partition the dataset in train + validation sets
+;; X_train, X_test, y_train, y_test = train_test_split(train, y, test_size = 0.3, random_state = 0)
+;; print("X_train : " + str(X_train.shape))
+;; print("X_test : " + str(X_test.shape))
+;; print("y_train : " + str(y_train.shape))
+;;   print("y_test : " + str(y_test.shape))
+  )
+
+
+(def standardize
+;;   # Standardize numerical features
+;; stdSc = StandardScaler()
+;; X_train.loc[:, numerical_features] = stdSc.fit_transform(X_train.loc[:, numerical_features])
+;;   X_test.loc[:, numerical_features] = stdSc.transform(X_test.loc[:, numerical_features])
+  )
+
+
+(def linear-regression
+
+
+;; RMSE on Training set : 15758371373.7
+;; RMSE on Test set : 0.395779797728
+
+  )
+
+
+(def ridge-gridsearch
+
+
+;; Best alpha : 30.0
+;; Try again for more precision with alphas centered around 30.0
+;; Best alpha : 24.0
+;; Ridge RMSE on Training set : 0.115405723285
+;; Ridge RMSE on Test set : 0.116427213778
+
+;;   Ridge picked 316 features and eliminated the other 3 features
+  )
+
+(def lasso
+
+;; Lasso picked 110 features and eliminated the other 209 features
+
+  )
+
+
+(def elastic
+;;   Best l1_ratio : 1.0
+;; Best alpha : 0.0006
+;; Try again for more precision with l1_ratio centered around 1.0
+;; Best l1_ratio : 1.0
+;; Best alpha : 0.0006
+;; Now try again for more precision on alpha, with l1_ratio fixed at 1.0 and alpha centered around 0.0006
+;; Best l1_ratio : 1.0
+;; Best alpha : 0.0006
+;; ElasticNet RMSE on Training set : 0.114111508375
+;;   ElasticNet RMSE on Test set : 0.115832132218
+
+
+;;   ElasticNet picked 110 features and eliminated the other 209 features
+
+  )
+
+
+
+
 (defn pp-str
   [ds]
   (with-out-str
@@ -480,7 +602,20 @@
                                                         str->number-pipeline
                                                         simplifications)
                                                 {})
-                            :dataset)]
+                            :dataset)
+        linear-data (-> (etl/apply-pipeline filtered-ds
+                                            (concat initial-pipeline-from-article
+                                                    more-categorical
+                                                    initial-missing-entries
+                                                    str->number-pipeline
+                                                    simplifications
+                                                    linear-combinations)
+                                            {})
+                        :dataset)
+        ;;Pandas default correlations mode is pearson
+        tablesaw-corrs (get (dataset/correlation-table linear-data :pearson)
+                            "SalePrice")
+        article-corrs (sort-by second > article-correlations)]
     (->> [:div
           [:h1 "Ames House Prices"]
           [:div
@@ -537,6 +672,40 @@ and a map and returns a new column."
                                (ds-col/unique)))]
             [:pre (pp-str (-> (dataset/column simplified-data "SimplKitchenQual")
                               (ds-col/unique)))]]]
+          [:div
+           [:h3 "linear combinations"]
+           [:p "From the original article, the author derived a lot of linear
+that are derived from the semantic meanings of the columns.  They take the
+form of equations such as:"
+            [:pre (pp-str '[[m= "TotalBath" (+ (col "BsmtFullBath")
+                                                (* 0.5 (col "BsmtHalfBath"))
+                                                (col "FullBath")
+                                                (* 0.5 (col "HalfBath")))]])]
+            [:pre (with-out-str
+                    (-> (dataset/select linear-data ["TotalBath"
+                                                     "BsmtFullBath"
+                                                     "BsmtHalfBath"
+                                                     "FullBath"
+                                                     "HalfBath"]
+                                        (range 20))
+                        (dataset/->flyweight)
+                        pp/print-table))]
+
+            [:pre (pp-str '[[m= "AllSF"  (+ (col "GrLivArea") (col "TotalBsmtSF"))]])]
+            [:pre (with-out-str
+                    (-> (dataset/select linear-data ["AllSF"
+                                                     "GrLivArea"
+                                                     "TotalBsmtSF"]
+                                        (range 20))
+                        (dataset/->flyweight)
+                        pp/print-table))]]
+           [:p "The author then checked columnwise correlations before proceeding
+further:"
+            [:pre (with-out-str
+                    (pp/print-table (map #(zipmap [:pandas :tablesaw]
+                                                  [%1 %2])
+                                         (take 20 article-corrs)
+                                         (take 20 tablesaw-corrs))))]]]
 
           [:h3 "Overall Gridsearch Results"]
           [:vega-lite {:data {:values (results->accuracy-dataset
@@ -551,3 +720,17 @@ and a map and returns a new column."
                                   :shape {:field :model-name
                                           :type :nominal}}}]]
          oz/view!)))
+
+
+(defn simple-corr
+  []
+  (let [src-dataset (tablesaw/path->tablesaw-dataset
+                     "data/ames-house-prices/train.csv")]
+    (-> src-dataset
+        (etl/apply-pipeline '[
+                              [m= "SalePrice" (log1p (cast (col)
+                                                           :float64))]]
+                            {})
+        :dataset
+        (dataset/select ["SalePrice" "GrLivArea"] :all)
+        (dataset/correlation-table))))
