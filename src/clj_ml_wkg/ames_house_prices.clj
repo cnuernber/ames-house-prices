@@ -26,7 +26,8 @@
 
             [oz.core :as oz]
 
-            [clojure.pprint :as pp])
+            [clojure.pprint :as pp]
+            [clojure.set :as c-set])
 
   (:import [tech.ml.protocols.etl PETLSingleColumnOperator]))
 
@@ -110,10 +111,6 @@
 
 (def initial-pipeline-from-article
   '[[remove "Id"]
-    ;;Because we support many datatypes, for the math sections we have to cast to
-    ;;the same datatype.  We provide an operator for doing this:
-    [->etl-datatype (or (and numeric? (not int64?))
-                        boolean?)]
     [m= "SalePrice" (log1p (col))]])
 
 
@@ -356,8 +353,6 @@
     ;; Encode MasVrnType
     [string->number "MasVnrType" ["None" "BrkCmn" "BrkFace" "CBlock" "Stone"]]
     [m= "HasMasVnr" (not-eq (col "MasVnrType") 0)]
-    ;;Encode any further string fields so we can do correlation table
-    [string->number string?]
     ]
   )
 
@@ -429,54 +424,39 @@
    }
   )
 
-(def polynomial-combinations
-;;   # Create new features
-;; # 3* Polynomials on the top 10 existing features
-;; train["OverallQual-s2"] = train["OverallQual"] ** 2
-;; train["OverallQual-s3"] = train["OverallQual"] ** 3
-;; train["OverallQual-Sq"] = np.sqrt(train["OverallQual"])
-;; train["AllSF-2"] = train["AllSF"] ** 2
-;; train["AllSF-3"] = train["AllSF"] ** 3
-;; train["AllSF-Sq"] = np.sqrt(train["AllSF"])
-;; train["AllFlrsSF-2"] = train["AllFlrsSF"] ** 2
-;; train["AllFlrsSF-3"] = train["AllFlrsSF"] ** 3
-;; train["AllFlrsSF-Sq"] = np.sqrt(train["AllFlrsSF"])
-;; train["GrLivArea-2"] = train["GrLivArea"] ** 2
-;; train["GrLivArea-3"] = train["GrLivArea"] ** 3
-;; train["GrLivArea-Sq"] = np.sqrt(train["GrLivArea"])
-;; train["SimplOverallQual-s2"] = train["SimplOverallQual"] ** 2
-;; train["SimplOverallQual-s3"] = train["SimplOverallQual"] ** 3
-;; train["SimplOverallQual-Sq"] = np.sqrt(train["SimplOverallQual"])
-;; train["ExterQual-2"] = train["ExterQual"] ** 2
-;; train["ExterQual-3"] = train["ExterQual"] ** 3
-;; train["ExterQual-Sq"] = np.sqrt(train["ExterQual"])
-;; train["GarageCars-2"] = train["GarageCars"] ** 2
-;; train["GarageCars-3"] = train["GarageCars"] ** 3
-;; train["GarageCars-Sq"] = np.sqrt(train["GarageCars"])
-;; train["TotalBath-2"] = train["TotalBath"] ** 2
-;; train["TotalBath-3"] = train["TotalBath"] ** 3
-;; train["TotalBath-Sq"] = np.sqrt(train["TotalBath"])
-;; train["KitchenQual-2"] = train["KitchenQual"] ** 2
-;; train["KitchenQual-3"] = train["KitchenQual"] ** 3
-;; train["KitchenQual-Sq"] = np.sqrt(train["KitchenQual"])
-;; train["GarageScore-2"] = train["GarageScore"] ** 2
-;; train["GarageScore-3"] = train["GarageScore"] ** 3
-  ;;   train["GarageScore-Sq"] = np.sqrt(train["GarageScore"]))
-  )
+
+(defn polynomial-combinations
+  [correlation-seq]
+  (let [correlation-colnames (->> correlation-seq
+                                  (drop 1)
+                                  (take 10)
+                                  (map first))]
+    (->> correlation-colnames
+         (mapcat (fn [colname]
+                   [['m= (str colname "-s2") ['** ['col colname] 2]]
+                    ['m= (str colname "-s3") ['** ['col colname] 3]]
+                    ['m= (str colname "-sqrt") ['sqrt ['col colname]]]])))))
 
 
-(def feature-type-counts
-  ;; Numerical features : 117
-  ;; Categorical features : 26
-  )
+(def fix-all-missing
+  '[
+    ;;Fix any remaining numeric columns by using the median.
+    [replace-missing numeric? (median (col))]
+    ;;Fix any string columns by using 'NA'.
+    [replace-missing string? "NA"]])
 
 
 (def initial-skew-count
   ;; 86 skewed numerical features to log transform
   )
 
-(def catgorical-missing
-  1)
+
+(def fix-all-skew
+  '[[m= [and
+         [numeric?]
+         [not "SalePrice"]
+         [> (abs (skew (col))) 0.5]]
+     (log1p (col))]])
 
 
 (def partition-dataset
@@ -551,6 +531,23 @@
     (pp/pprint ds)))
 
 
+(defn print-table-str
+  ([ks data]
+   (with-out-str
+     (->> data
+          (map (fn [item-map]
+                 (->> item-map
+                      (map (fn [[k v]]
+                             [k (if (or (float? v)
+                                        (double? v))
+                                  (format "%.3f" v)
+                                  v)]))
+                      (into {}))))
+          (pp/print-table ks))))
+  ([data]
+   (print-table-str (sort (keys (first data))) data)))
+
+
 (defn presentation
   []
   (let [src-dataset (tablesaw/path->tablesaw-dataset
@@ -615,7 +612,44 @@
         ;;Pandas default correlations mode is pearson
         tablesaw-corrs (get (dataset/correlation-table linear-data :pearson)
                             "SalePrice")
-        article-corrs (sort-by second > article-correlations)]
+        article-corrs (sort-by second > article-correlations)
+        polynomial-pipe (polynomial-combinations tablesaw-corrs)
+        poly-data (-> (etl/apply-pipeline filtered-ds
+                                          (concat initial-pipeline-from-article
+                                                  more-categorical
+                                                  initial-missing-entries
+                                                  str->number-pipeline
+                                                  simplifications
+                                                  linear-combinations
+                                                  polynomial-pipe)
+                                          {})
+                      :dataset)
+
+        median-filled (-> (etl/apply-pipeline filtered-ds
+                                              (concat initial-pipeline-from-article
+                                                      more-categorical
+                                                      initial-missing-entries
+                                                      str->number-pipeline
+                                                      simplifications
+                                                      linear-combinations
+                                                      polynomial-pipe
+                                                      fix-all-missing)
+                                              {})
+                          :dataset)
+
+        skew-fixed (-> (etl/apply-pipeline filtered-ds
+                                            (concat initial-pipeline-from-article
+                                                      more-categorical
+                                                      initial-missing-entries
+                                                      str->number-pipeline
+                                                      simplifications
+                                                      linear-combinations
+                                                      polynomial-pipe
+                                                      fix-all-missing
+                                                      fix-all-skew)
+                                            {})
+                       :dataset)
+        ]
     (->> [:div
           [:h1 "Ames House Prices"]
           [:div
@@ -623,7 +657,7 @@
            [:p "First we note that there are several dataset outliers"]
            outliers-graph
            [:p "We then fix this with a simple pipeline operation: "
-            [:pre (pr-str initial-pipeline-from-article)]]
+            [:pre (pr-str '(pipe-ops/filter src-dataset "GrLivArea" '(< (col) 4000)))]]
            fixed-outlier-graph]
           [:div
            [:h3 "Categorical Fixes"]
@@ -673,7 +707,7 @@ and a map and returns a new column."
             [:pre (pp-str (-> (dataset/column simplified-data "SimplKitchenQual")
                               (ds-col/unique)))]]]
           [:div
-           [:h3 "linear combinations"]
+           [:h3 "linear/polynomial combinations"]
            [:p "From the original article, the author derived a lot of linear
 that are derived from the semantic meanings of the columns.  They take the
 form of equations such as:"
@@ -699,13 +733,107 @@ form of equations such as:"
                                         (range 20))
                         (dataset/->flyweight)
                         pp/print-table))]]
-           [:p "The author then checked columnwise correlations before proceeding
-further:"
+           [:p "The author then checked pearson correlation vs the target:"
             [:pre (with-out-str
-                    (pp/print-table (map #(zipmap [:pandas :tablesaw]
+                    (pp/print-table (map #(zipmap [:pandas :tech.ml.dataset]
                                                   [%1 %2])
                                          (take 20 article-corrs)
-                                         (take 20 tablesaw-corrs))))]]]
+                                         (take 20 tablesaw-corrs))))]]
+           [:p "Using the correlation table, we create polynomial features:"
+            [:pre (pp-str (->> tablesaw-corrs
+                               (polynomial-combinations)
+                               (take 3)))]
+            [:pre (with-out-str
+                    (pp/print-table
+                     (-> poly-data
+                         (dataset/select ["OverallQual"
+                                          "OverallQual-s2"
+                                          "OverallQual-s3"
+                                          "OverallQual-sqrt"]
+                                         (range 10))
+                         (dataset/->flyweight))))]]]
+          [:div
+           [:h3 "Final cleanup"]
+           [:p "Feature type counts.  The article considers anything non-numeric to be
+categorical.  This is a point on which the tech.ml.dataset system differs.  For tech,
+Any column can be considered categorical and the underlying datatype does not change
+this definition.  Earlier the article converted numeric columns to string to indicate
+they are categorical but we just set metadata."
+            [:pre (pp-str {:numeric-features
+                           (count (col-filters/execute-column-filter
+                                   poly-data
+                                   '[and [not "SalePrice"]
+                                     numeric?]))
+                           :non-numeric-features
+                           (count (col-filters/execute-column-filter
+                                   poly-data '[not numeric?]))})]]
+           [:p "Existing missing counts"
+            [:pre (pp-str (dataset/columns-with-missing-seq poly-data))]
+            [:pre (pp-str fix-all-missing)]
+            "After fillings:"
+            [:pre (pp-str (dataset/columns-with-missing-seq median-filled))]]
+           [:p (str "skew counts: " (count (col-filters/execute-column-filter median-filled
+                                                                              '[and
+                                                                                [numeric?]
+                                                                                [not "SalePrice"]
+                                                                                [> (abs (skew (col))) 0.5]])))]
+           [:p "We have the same skew count because we include categorical columns already converted to numeric values.
+Fixing skew here changes those categorical definitions into the log of the categorical definition.  This will eliminate
+the system's ability to map the values back into keywords later but it probably does make sense as the columns converted
+already were converted with a distinct order that matched the semantic definition of the column."
+            [:pre (pp-str fix-all-skew)]
+            "Post skew counts: "  (count (col-filters/execute-column-filter
+                                          skew-fixed
+                                          '[and
+                                            [numeric?]
+                                            [not "SalePrice"]
+                                            [> (abs (skew (col))) 0.5]]))]
+
+           [:p "The fix proposed didn't actually fix the skew issue for the majority of columns.  Let's look at some
+of the columns before and after where the fix didn't work:"
+            (let [before-columns (set (col-filters/execute-column-filter
+                                       median-filled
+                                       '[and
+                                         [numeric?]
+                                         [not "SalePrice"]
+                                         [> (abs (skew (col))) 0.5]]))
+                  after-columns (set (col-filters/execute-column-filter
+                                          skew-fixed
+                                          '[and
+                                            [numeric?]
+                                            [not "SalePrice"]
+                                            [> (abs (skew (col))) 0.5]]))
+                  check-columns (c-set/intersection before-columns after-columns)]
+              [:pre
+               (->> check-columns
+                    (map (fn [colname]
+                           (let [{before-min :min
+                                  before-max :max
+                                  before-mean :mean
+                                  before-skew :skew} (-> (dataset/column median-filled colname)
+                                                         (ds-col/stats [:min :max :mean :skew]))
+                                 {after-min :min
+                                  after-max :max
+                                  after-mean :mean
+                                  after-skew :skew} (-> (dataset/column skew-fixed colname)
+                                                        (ds-col/stats [:min :max :mean :skew]))]
+                             {:column-name colname
+                              :before-skew before-skew
+                              :after-skew after-skew
+                              :before-mean before-mean
+                              :after-mean after-mean
+                              :before-min before-min
+                              :after-min after-min
+                              :before-max before-max
+                              :after-max after-max})))
+                    (print-table-str [:column-name :before-skew :after-skew
+                                      :before-mean :after-mean
+                                      :before-min :after-min
+                                      :before-max :after-max]))])]
+           [:p "We can see that the log1p fix only works in certain cases.  If the skew is positive, it will reduce it potentially
+to below zero.  If it is negative, it will increase it's absolute value.  Data science is just hard this way."]]
+
+
 
           [:h3 "Overall Gridsearch Results"]
           [:vega-lite {:data {:values (results->accuracy-dataset
