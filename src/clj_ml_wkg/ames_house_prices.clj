@@ -512,11 +512,8 @@
 
 (defn gridsearch-dataset
   [dataset options]
-  (let [base-systems [{:model-type :libsvm/regression}
-                      {:model-type :smile.regression/lasso}
-                      {:model-type :smile.regression/ridge}
-                      {:model-type :smile.regression/elastic-net}
-                      {:model-type :xgboost/regression}]
+  (let [base-systems [{:model-type :smile.regression/lasso}
+                      {:model-type :smile.regression/elastic-net}]
         dataset-name :full-ames-pathway
         results (->> base-systems
                      (map #(merge options %))
@@ -628,7 +625,9 @@
         ;;list of numeric features.
         numerical-features (col-filters/numeric? poly-data)
         ;;Leftover string features are categorical
-        categorical-features (col-filters/execute-column-filter poly-data '[not numeric?])
+        categorical-features (col-filters/execute-column-filter
+                              poly-data
+                              '[not numeric?])
 
         median-filled (-> (etl/apply-pipeline filtered-ds
                                               (concat initial-pipeline-from-article
@@ -638,7 +637,8 @@
                                                       simplifications
                                                       linear-combinations
                                                       polynomial-pipe
-                                                      fix-all-missing)
+                                                      fix-all-missing
+                                                      '[[string->number string?]])
                                               {})
                           :dataset)
 
@@ -651,7 +651,8 @@
                                                       linear-combinations
                                                       polynomial-pipe
                                                       fix-all-missing
-                                                      fix-all-skew)
+                                                      fix-all-skew
+                                                      '[[string->number string?]])
                                             {})
                        :dataset)
 
@@ -686,7 +687,7 @@
                                                                one-hot-the-rest
                                                                (std-scale-numeric-features numerical-features))
                                                        {:target "SalePrice"})
-        {:keys [train-ds test-ds]} (dataset/->train-test-split final-dataset {})
+        {:keys [train-ds test-ds]} (dataset/->train-test-split one-hotted {})
         gridsearch-results (if (or (not (.exists ^File (io/file "file://ames-gridsearch-results.nippy")))
                                    force-gridsearch?)
                              (do
@@ -908,7 +909,8 @@ test set not this training dataset."
                       (print-table-str [:column-name :mean :variance]))]]
 
           [:h3 "Overall Gridsearch Results"]
-          [:vega-lite {:data {:values (results->accuracy-dataset gridsearch-results)}
+          [:vega-lite {:data {:values (->> (results->accuracy-dataset
+                                            gridsearch-results))}
                        :mark :point
                        :encoding {:y {:field :average-loss
                                       :type :quantitative}
