@@ -36,6 +36,8 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
+(tech.ml.utils/set-slf4j-log-level :warn)
+
 
 (def initial-pipeline-from-article
   '[[remove "Id"]
@@ -688,7 +690,7 @@
         gridsearch-results (if (or (not (.exists ^File (io/file "file://ames-gridsearch-results.nippy")))
                                    force-gridsearch?)
                              (do
-                               (println "Gridsearching.  This usually takes a really long time.  Like 20 mins or so.")
+                               (println "Gridsearching.  This usually takes a really long time.  Like 2 hours or so.")
                                (gridsearch-dataset train-ds final-options))
                              (load-results))]
     (->> [:div
