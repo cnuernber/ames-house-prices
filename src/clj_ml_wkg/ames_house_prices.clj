@@ -501,7 +501,7 @@
            milliseconds :milliseconds}
           (ml-utils/time-section
            (ml/gridsearch
-            gs-options
+            (assoc gs-options :k-fold 10)
             loss-fn
             dataset))]
       (->> results
@@ -511,31 +511,25 @@
 
 
 (defn gridsearch-dataset
-  [dataset options]
-  (let [base-systems [{:model-type :libsvm/regression}
-                      {:model-type :smile.regression/lasso}
-                      {:model-type :smile.regression/ridge}
-                      {:model-type :smile.regression/elastic-net}
-                      {:model-type :xgboost/regression}]
-        dataset-name :full-ames-pathway
-        results (->> base-systems
-                     (map #(merge options %))
-                     (mapcat
-                      (partial gridsearch-model
-                               dataset-name
-                               dataset
-                               loss/rmse))
-                     vec)]
-    (io/put-nippy! "file://ames-gridsearch-results.nippy"
-                   results)
-    results))
+  [dataset-name force-gridsearch? dataset options]
+  (let [ds-filename (format "file://ames-%s-results.nippy" dataset-name)]
+    (if (or force-gridsearch?
+            (not (.exists ^File (io/file ds-filename))))
+      (let [base-systems [{:model-type :smile.regression/lasso}
+                          {:model-type :smile.regression/ridge}
+                          {:model-type :smile.regression/elastic-net}]
+            results (->> base-systems
+                         (map #(merge options %))
+                         (mapcat
+                          (partial gridsearch-model
+                                   dataset-name
+                                   dataset
+                                   loss/rmse))
+                         vec)]
+        (io/put-nippy! ds-filename results)
+        results)
+      (io/get-nippy ds-filename))))
 
-
-(def load-results
-  (memoize
-   (fn
-     []
-     (io/get-nippy "file://ames-gridsearch-results.nippy"))))
 
 
 (defn results->accuracy-dataset
@@ -546,6 +540,22 @@
                :model-name (str (:model-type options))
                :predict-time predict-time
                :train-time train-time}))))
+
+
+(defn render-results
+  [title gridsearch-results]
+  [:div
+   [:h3 title]
+   [:vega-lite {:data {:values (results->accuracy-dataset gridsearch-results)}
+                :mark :point
+                :encoding {:y {:field :average-loss
+                               :type :quantitative}
+                           :x {:field :model-name
+                               :type :nominal}
+                           :color {:field :model-name
+                                   :type :nominal}
+                           :shape {:field :model-name
+                                   :type :nominal}}}]])
 
 
 (defn presentation
@@ -626,9 +636,14 @@
                                           {})
                       :dataset)
         ;;list of numeric features.
-        numerical-features (col-filters/numeric? poly-data)
+        numerical-features (col-filters/select-columns poly-data '[and
+                                                                   [not "SalePrice"]
+                                                                   numeric?])
         ;;Leftover string features are categorical
-        categorical-features (col-filters/execute-column-filter poly-data '[not numeric?])
+        categorical-features (col-filters/select-columns poly-data '[and
+                                                                     [not "SalePrice"]
+                                                                     [not numeric?]])
+
 
         median-filled (-> (etl/apply-pipeline filtered-ds
                                               (concat initial-pipeline-from-article
@@ -642,33 +657,41 @@
                                               {})
                           :dataset)
 
-        skew-fixed (-> (etl/apply-pipeline filtered-ds
-                                            (concat initial-pipeline-from-article
-                                                      more-categorical
-                                                      initial-missing-entries
-                                                      str->number-pipeline
-                                                      simplifications
-                                                      linear-combinations
-                                                      polynomial-pipe
-                                                      fix-all-missing
-                                                      fix-all-skew)
-                                            {})
-                       :dataset)
+        {skew-fixed :dataset
+         skew-fixed-options :options} (etl/apply-pipeline filtered-ds
+                                                          (concat initial-pipeline-from-article
+                                                                  more-categorical
+                                                                  initial-missing-entries
+                                                                  str->number-pipeline
+                                                                  simplifications
+                                                                  linear-combinations
+                                                                  polynomial-pipe
+                                                                  fix-all-missing
+                                                                  fix-all-skew)
+                                                          {:target "SalePrice"})
 
-        one-hotted (-> (etl/apply-pipeline filtered-ds
-                                           (concat initial-pipeline-from-article
-                                                   more-categorical
-                                                   initial-missing-entries
-                                                   str->number-pipeline
-                                                   simplifications
-                                                   linear-combinations
-                                                   polynomial-pipe
-                                                   fix-all-missing
-                                                   fix-all-skew
-                                                   one-hot-the-rest)
-                                           {:target "SalePrice"})
-                       :dataset)
+        skew-fix-results (gridsearch-dataset "skew-fix" force-gridsearch?
+                                             (pipe-ops/string->number skew-fixed (col-filters/string? skew-fixed))
+                                             skew-fixed-options)
 
+
+        {one-hotted :dataset
+         one-hotted-options :options} (etl/apply-pipeline filtered-ds
+                                                          (concat initial-pipeline-from-article
+                                                                  more-categorical
+                                                                  initial-missing-entries
+                                                                  str->number-pipeline
+                                                                  simplifications
+                                                                  linear-combinations
+                                                                  polynomial-pipe
+                                                                  fix-all-missing
+                                                                  fix-all-skew
+                                                                  one-hot-the-rest)
+                                                          {:target "SalePrice"})
+
+        one-hotted-results (gridsearch-dataset "one-hot"
+                                               force-gridsearch?
+                                               one-hotted one-hotted-options)
 
         ;;The final pipeline before training.
         {final-dataset :dataset
@@ -686,13 +709,8 @@
                                                                one-hot-the-rest
                                                                (std-scale-numeric-features numerical-features))
                                                        {:target "SalePrice"})
-        {:keys [train-ds test-ds]} (dataset/->train-test-split final-dataset {})
-        gridsearch-results (if (or (not (.exists ^File (io/file "file://ames-gridsearch-results.nippy")))
-                                   force-gridsearch?)
-                             (do
-                               (println "Gridsearching.  This usually takes a really long time.  Like 2 hours or so.")
-                               (gridsearch-dataset train-ds final-options))
-                             (load-results))]
+        final-results (gridsearch-dataset "final" force-gridsearch?
+                                          final-dataset final-options)]
     (->> [:div
           [:h1 "Ames House Prices"]
           [:div
@@ -706,12 +724,12 @@
            [:h3 "Categorical Fixes"]
            [:p "Whether columns are categorical is defined by attributes:"]
            [:p "Pre-fix:"
-            [:pre (pp-str (col-filters/execute-column-filter
+            [:pre (pp-str (col-filters/select-columns
                            src-dataset 'categorical?))]]
            [:p "The fix is simple:"
             [:pre (pp-str more-categorical)]]
            [:p "Post-fix:"
-            [:pre (pp-str (col-filters/execute-column-filter
+            [:pre (pp-str (col-filters/select-columns
                            after-categorical 'categorical?))]]]
           [:div
            [:h3 "Missing #1"]
@@ -803,20 +821,31 @@ Any column can be considered categorical and the underlying datatype does not ch
 this definition.  Earlier the article converted numeric columns to string to indicate
 they are categorical but we just set metadata."
             [:pre (pp-str {:numeric-features
-                           (count (col-filters/execute-column-filter
+                           (count (col-filters/select-columns
                                    poly-data
                                    '[and [not "SalePrice"]
                                      numeric?]))
                            :non-numeric-features
-                           (count (col-filters/execute-column-filter
-                                   poly-data '[not numeric?]))})]]
+                           (count (col-filters/select-columns
+                                   poly-data '[not numeric?]))})]
+            "This doesn't match pandas, and I am not sure why.  We take the set
+difference between what we got and what pandas got and some of our columns ended up
+numeric while theirs end up string.  Hints welcome..."
+            [:pre (->> (c-set/difference (set ["MSSubClass", "MSZoning", "Alley", "LandContour", "LotConfig",
+                                               "Neighborhood", "Condition1", "Condition2", "BldgType",
+                                               "HouseStyle", "RoofStyle", "RoofMatl", "Exterior1st",
+                                               "Exterior2nd", "MasVnrType", "Foundation", "Heating", "CentralAir",
+                                               "Electrical", "GarageType", "GarageFinish", "Fence", "MiscFeature",
+                                               "MoSold", "SaleType", "SaleCondition"])
+                                         (set categorical-features))
+                       (map (comp ds-col/metadata (partial dataset/column poly-data))))]]
            [:p "Existing missing counts"
             [:pre (pp-str (dataset/columns-with-missing-seq poly-data))]
             [:pre (pp-str fix-all-missing)]
             "After fillings:"
             [:pre (pp-str (dataset/columns-with-missing-seq median-filled))]]
            [:h3 "Skew"]
-           [:p (str "skew counts: " (count (col-filters/execute-column-filter
+           [:p (str "skew counts: " (count (col-filters/select-columns
                                             median-filled
                                             '[and
                                               [numeric?]
@@ -829,7 +858,7 @@ system's ability to map the values back into keywords later but it probably does
 sense as the columns converted already were converted with a distinct order that matched
 the semantic definition of the column."
             [:pre (pp-str fix-all-skew)]
-            "Post skew counts: "  (count (col-filters/execute-column-filter
+            "Post skew counts: "  (count (col-filters/select-columns
                                           skew-fixed
                                           '[and
                                             [numeric?]
@@ -838,13 +867,13 @@ the semantic definition of the column."
 
            [:p "The fix proposed didn't actually fix the skew issue for the majority of
 columns.  Let's look at some of the columns before and after where the fix didn't work:"
-            (let [before-columns (set (col-filters/execute-column-filter
+            (let [before-columns (set (col-filters/select-columns
                                        median-filled
                                        '[and
                                          [numeric?]
                                          [not "SalePrice"]
                                          [> (abs (skew (col))) 0.5]]))
-                  after-columns (set (col-filters/execute-column-filter
+                  after-columns (set (col-filters/select-columns
                                           skew-fixed
                                           '[and
                                             [numeric?]
@@ -879,12 +908,16 @@ columns.  Let's look at some of the columns before and after where the fix didn'
                                       :before-max :after-max]))])]
            [:p "We can see that the log1p fix only works in certain cases.  If the skew
 is positive, it will reduce it potentially to below zero.  If it is negative, it will
-increase it's absolute value.  Data science is just unforgiving this way."]]
+increase it's absolute value.  Data science is just unforgiving this way."]
+           (render-results "Skew Fix" skew-fix-results)]
 
+
+          [:h3 "One Hot Encoding"]
           [:p "At this point the author one-hot encodes any remaining string parameters."
            [:pre (pp-str one-hot-the-rest)]
            "Number of remaining string fields: "
            (count (col-filters/string? one-hotted))]
+          (render-results "One Hot" one-hotted-results)
 
 
           [:p "Now we std-scale.  Unlike the author, we do this over the entire dataset.
@@ -907,17 +940,7 @@ test set not this training dataset."
                                     {:column-name  (ds-col/column-name col)})))
                       (print-table-str [:column-name :mean :variance]))]]
 
-          [:h3 "Overall Gridsearch Results"]
-          [:vega-lite {:data {:values (results->accuracy-dataset gridsearch-results)}
-                       :mark :point
-                       :encoding {:y {:field :average-loss
-                                      :type :quantitative}
-                                  :x {:field :model-name
-                                      :type :nominal}
-                                  :color {:field :model-name
-                                          :type :nominal}
-                                  :shape {:field :model-name
-                                          :type :nominal}}}]]
+          (render-results "Final" final-results)]
          oz/view!)))
 
 

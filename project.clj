@@ -4,7 +4,7 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.9.0"]
-                 [techascent/tech.ml "0.17"]
+                 [techascent/tech.ml "0.19"]
                  [metasoarous/oz "1.5.2"]]
   :profiles {:dev {:dependencies [[org.clojure/tools.logging "0.3.1"]
                                   [ch.qos.logback/logback-classic "1.1.3"]]}})
