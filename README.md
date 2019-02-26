@@ -28,12 +28,6 @@ lein repl
 
 (in-ns 'clj-ml-wkg/ames-house-prices)
 
-;;Either load initial results
-(def gs-results (io/get-nippy "file://ames-gridsearch-results.nippy"))
-
-;;Or train
-(def gs-result (gridsearch-the-things))
-
 ;; To see progress against reference article: 
 
 (presentation)
