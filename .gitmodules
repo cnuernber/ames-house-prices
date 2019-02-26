@@ -1,0 +1,3 @@
+[submodule "clojupyter"]
+	path = clojupyter
+	url = git@github.com:techascent/clojupyter
