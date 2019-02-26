@@ -18,4 +18,6 @@ popd
 popd
 
 
-wget https://s3.us-east-2.amazonaws.com/tech.public.data/ames-gridsearch-results.nippy
+wget https://s3.us-east-2.amazonaws.com/tech.public.data/ames-final-results.nippy
+wget https://s3.us-east-2.amazonaws.com/tech.public.data/ames-one-hot-results.nippy
+wget https://s3.us-east-2.amazonaws.com/tech.public.data/ames-skew-fix-results.nippy

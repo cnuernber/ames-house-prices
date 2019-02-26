@@ -393,6 +393,10 @@
   '[[one-hot string?]])
 
 
+(def string->number-the-rest
+  '[[string->number string?]])
+
+
 (defn std-scale-numeric-features
   [numeric-feature-column-names]
   [['std-scaler (vec numeric-feature-column-names)]])
@@ -706,7 +710,7 @@
                                                                polynomial-pipe
                                                                fix-all-missing
                                                                fix-all-skew
-                                                               one-hot-the-rest
+                                                               string->number-the-rest
                                                                (std-scale-numeric-features numerical-features))
                                                        {:target "SalePrice"})
 
@@ -915,11 +919,12 @@ increase it's absolute value.  Data science is just unforgiving this way."]
 
 
           [:h3 "One Hot Encoding"]
-          [:p "At this point the author one-hot encodes any remaining string parameters."
+          [:p "At this point we trye one-hot encoding any remaining string parameters."
            [:pre (pp-str one-hot-the-rest)]
            "Number of remaining string fields: "
            (count (col-filters/string? one-hotted))]
           (render-results "One Hot" one-hotted-results)
+          [:p "This didn't work out so well...we will just do string->number"]
 
 
           [:p "Now we std-scale.  Unlike the author, we do this over the entire dataset.
