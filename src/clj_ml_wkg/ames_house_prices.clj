@@ -531,7 +531,6 @@
       (io/get-nippy ds-filename))))
 
 
-
 (defn results->accuracy-dataset
   [gridsearch-results]
   (->> gridsearch-results
@@ -653,7 +652,8 @@
                                                       simplifications
                                                       linear-combinations
                                                       polynomial-pipe
-                                                      fix-all-missing)
+                                                      fix-all-missing
+                                                      '[[string->number string?]])
                                               {})
                           :dataset)
 
@@ -709,8 +709,10 @@
                                                                one-hot-the-rest
                                                                (std-scale-numeric-features numerical-features))
                                                        {:target "SalePrice"})
+
         final-results (gridsearch-dataset "final" force-gridsearch?
                                           final-dataset final-options)]
+
     (->> [:div
           [:h1 "Ames House Prices"]
           [:div
