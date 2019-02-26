@@ -178,7 +178,7 @@ We first check for outliers, graph and then remove them.
     oz/view!)
 ```
 
-[!first-viz](images/vsualization.png)
+[!first-viz](images/visualization.png)
 
 ```
 
@@ -205,7 +205,7 @@ We first check for outliers, graph and then remove them.
 
 
 
-[!first-viz](images/vsualization-1.png)
+[!next-viz](images/visualization-1.png)
 
 
 ## Initial Pipeline
