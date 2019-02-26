@@ -178,7 +178,7 @@ We first check for outliers, graph and then remove them.
     oz/view!)
 ```
 
-[!first-viz](images/visualization.png)
+![first-viz](images/visualization.png)
 
 ```
 
@@ -205,7 +205,7 @@ We first check for outliers, graph and then remove them.
 
 
 
-[!next-viz](images/visualization-1.png)
+![next-viz](images/visualization-1.png)
 
 
 ## Initial Pipeline
@@ -1055,7 +1055,7 @@ In any case, let's see some actual results:
 (oz/view! (render-results "Skew Fix" skew-fix-models))
 ```
 
-[!first-viz](images/vsualization-2.png)
+![first-viz](images/visualization-2.png)
 
 
 ## std-scaler
@@ -1142,4 +1142,4 @@ We now train our prepared data across a range of models.
 (oz/view! (render-results "Final Models" final-models))
 ```
 
-[!first-viz](images/vsualization-3.png)
+![first-viz](images/visualization-3.png)
