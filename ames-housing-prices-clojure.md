@@ -27,9 +27,7 @@ The target is to predict the SalePrice column.
 (require '[tech.libs.tablesaw :as tablesaw])
 
 ;;model generators
-(require '[tech.libs.xgboost])
 (require '[tech.libs.smile.regression])
-(require '[tech.libs.svm])
 
 ;;put/get nippy
 (require '[tech.io :as io])
