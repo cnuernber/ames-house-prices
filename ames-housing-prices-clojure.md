@@ -178,12 +178,11 @@ We first check for outliers, graph and then remove them.
 
 ![first-viz](images/visualization.png)
 
+
+```clojure
+(def filtered-ds (pipe-ops/filter src-dataset "GrLivArea" '(< (col) 4000)))
 ```
-
-
-
-
-    #'user/filtered-ds
+#'user/filtered-ds
 
 
 
