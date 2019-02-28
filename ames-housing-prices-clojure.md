@@ -1,6 +1,13 @@
 
 # Getting Started
 
+This is a tutorial for a a couple of new Clojure libraries for Machine Learning and ETL -- part of the tech.ml stack.
+
+Author: Chris Nuernberger
+Translated to [Nextjournal](https://nextjournal.com/alan/tech-dataset-getting-started): Alan Marazzi
+
+The API is still alpha, we are putting our efforts into extending and beautifying it. Comments will be welcome!"
+
 Reading from an excellent article on [advanced regression techniques](https://www.kaggle.com/juliencs/a-study-on-regression-applied-to-the-ames-dataset).  
 
 The target is to predict the SalePrice column.
