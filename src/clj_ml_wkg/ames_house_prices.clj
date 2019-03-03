@@ -20,6 +20,7 @@
             [tech.libs.xgboost]
             [tech.libs.smile.regression]
             [tech.libs.svm]
+            [tech.libs.daal.regression]
 
             ;;put/get nippy
             [tech.io :as io]
@@ -27,7 +28,8 @@
             [oz.core :as oz]
 
             [clojure.pprint :as pp]
-            [clojure.set :as c-set])
+            [clojure.set :as c-set]
+            [clojure.core.matrix :as m])
 
   (:import [tech.ml.protocols.etl PETLSingleColumnOperator]
            [java.io File]))
@@ -491,48 +493,19 @@
    (print-table-str (sort (keys (first data))) data)))
 
 
-(defn gridsearch-model
-  [dataset-name dataset loss-fn opts]
-  (let [gs-options (ml/auto-gridsearch-options
-                    (assoc opts
-                           :gridsearch-depth 75
-                           :top-n 20))]
-    (println (format "Dataset: %s, Model %s"
-                     dataset-name
-                     (:model-type opts)))
-    (let [gs-start (System/nanoTime)
-          {results :retval
-           milliseconds :milliseconds}
-          (ml-utils/time-section
-           (ml/gridsearch
-            (assoc gs-options :k-fold 10)
-            loss-fn
-            dataset))]
-      (->> results
-           (mapv #(merge %
-                         {:gridsearch-time-ms milliseconds
-                          :dataset-name dataset-name}))))))
-
-
-(defn gridsearch-dataset
-  [dataset-name force-gridsearch? dataset options]
-  (let [ds-filename (format "file://ames-%s-results.nippy" dataset-name)]
-    (if (or force-gridsearch?
-            (not (.exists ^File (io/file ds-filename))))
-      (let [base-systems [{:model-type :smile.regression/lasso}
-                          {:model-type :smile.regression/ridge}
-                          {:model-type :smile.regression/elastic-net}]
-            results (->> base-systems
-                         (map #(merge options %))
-                         (mapcat
-                          (partial gridsearch-model
-                                   dataset-name
-                                   dataset
-                                   loss/rmse))
-                         vec)]
-        (io/put-nippy! ds-filename results)
-        results)
-      (io/get-nippy ds-filename))))
+(defn verify-model
+  [trained-model test-ds loss-fn]
+  (let [predictions (ml/predict trained-model test-ds)
+        labels (dataset/labels test-ds (:options trained-model))
+        loss-val (loss-fn predictions labels)
+        residuals (m/sub labels predictions)]
+        (merge
+     {:loss loss-val
+      :residuals (vec residuals)
+      :predictions (vec predictions)
+      :average-loss loss-val
+      :labels labels}
+     trained-model)))
 
 
 (defn results->accuracy-dataset
@@ -551,14 +524,85 @@
    [:h3 title]
    [:vega-lite {:data {:values (results->accuracy-dataset gridsearch-results)}
                 :mark :point
+                :transform [{:filter {:field :average-loss :range [0.10, 0.20]}}]
                 :encoding {:y {:field :average-loss
-                               :type :quantitative}
+                               :type :quantitative
+                               :scale {:domain [0.10 0.20] }}
                            :x {:field :model-name
                                :type :nominal}
                            :color {:field :model-name
                                    :type :nominal}
                            :shape {:field :model-name
                                    :type :nominal}}}]])
+
+(defn train-regressors
+  [dataset-name dataset loss-fn opts]
+  (let [base-systems [
+                      ;;linear ends up blowing out the graphs.
+                      ;; :daal.regression/linear
+                      :daal.regression/ridge
+                      :daal.regression/gradient-boosted-trees]
+        base-gridsearch-systems [
+                                 :libsvm/regression
+                                 :smile.regression/lasso]
+        train-test-split (dataset/->train-test-split dataset opts)
+        trained-results
+        (concat (->> base-systems
+                     (mapv (fn [model-type]
+                             (println (format "Training dataset %s model %s" dataset-name model-type))
+                             (let [best-model (ml/train (assoc opts :model-type model-type)
+                                                        (:train-ds train-test-split))]
+                               (verify-model best-model (:test-ds train-test-split) loss-fn)))))
+                (->> base-gridsearch-systems
+                     (mapv (fn [model-type]
+                             (println (format "Gridsearching dataset %s model %s" dataset-name model-type))
+                             (let [best-model (-> (ml/gridsearch (assoc opts
+                                                                        :model-type model-type
+                                                                        :k-fold 10
+                                                                        :gridsearch-depth 50)
+                                                                 loss-fn (:train-ds train-test-split))
+                                                  first)]
+                               (verify-model best-model (:test-ds train-test-split) loss-fn))))))]
+    (vec trained-results)))
+
+
+(defn train-graph-regressors
+  [dataset-name dataset loss-fn opts]
+  (let [fname (format "file://trained-models-%s.nippy" dataset-name)
+        trained-results
+        (if (not (.exists ^File (io/file fname)))
+          (let [trained-results (train-regressors dataset-name dataset loss-fn opts)]
+            (io/put-nippy! fname trained-results)
+            trained-results)
+          (io/get-nippy fname))
+        flattened-results (->> trained-results
+                               (mapcat (fn [{:keys [options residuals predictions labels]}]
+                                         (map (fn [res pred label]
+                                                {:model-name (str (get options :model-type))
+                                                 :residual res
+                                                 :prediction pred
+                                                 :label label})
+                                              residuals predictions labels)))
+                               (group-by #(get-in % [:model-name])))]
+    (->> (apply concat (render-results dataset-name trained-results)
+                (->> flattened-results
+                     (map (fn [[model-name value-seq]]
+                            [[:div
+                              [:h4 model-name]
+                              [:vega-lite {:repeat {:column [:residual :prediction]}
+                                           :spec {:data {:values value-seq}
+                                                  :mark :point
+                                                  :encoding {:y {:field :label
+                                                                 :type :quantitative
+                                                                 :scale {:domain [8 14]}}
+                                                             :x {:field {:repeat :column}
+                                                                 :type :quantitative}
+                                                             :color {:field :model-name
+                                                                     :type :nominal}
+                                                             :shape {:field :model-name
+                                                                     :type :nominal}}}}]]]))))
+         (into [:div]))))
+
 
 
 (defn presentation
@@ -674,29 +718,6 @@
                                                                   fix-all-skew)
                                                           {:target "SalePrice"})
 
-        skew-fix-results (gridsearch-dataset "skew-fix" force-gridsearch?
-                                             (pipe-ops/string->number skew-fixed (col-filters/string? skew-fixed))
-                                             skew-fixed-options)
-
-
-        {one-hotted :dataset
-         one-hotted-options :options} (etl/apply-pipeline filtered-ds
-                                                          (concat initial-pipeline-from-article
-                                                                  more-categorical
-                                                                  initial-missing-entries
-                                                                  str->number-pipeline
-                                                                  simplifications
-                                                                  linear-combinations
-                                                                  polynomial-pipe
-                                                                  fix-all-missing
-                                                                  fix-all-skew
-                                                                  one-hot-the-rest)
-                                                          {:target "SalePrice"})
-
-        one-hotted-results (gridsearch-dataset "one-hot"
-                                               force-gridsearch?
-                                               one-hotted one-hotted-options)
-
         ;;The final pipeline before training.
         {final-dataset :dataset
          final-options :options
@@ -712,10 +733,7 @@
                                                                fix-all-skew
                                                                string->number-the-rest
                                                                (std-scale-numeric-features numerical-features))
-                                                       {:target "SalePrice"})
-
-        final-results (gridsearch-dataset "final" force-gridsearch?
-                                          final-dataset final-options)]
+                                                       {:target "SalePrice"})]
 
     (->> [:div
           [:h1 "Ames House Prices"]
@@ -915,16 +933,9 @@ columns.  Let's look at some of the columns before and after where the fix didn'
            [:p "We can see that the log1p fix only works in certain cases.  If the skew
 is positive, it will reduce it potentially to below zero.  If it is negative, it will
 increase it's absolute value.  Data science is just unforgiving this way."]
-           (render-results "Skew Fix" skew-fix-results)]
-
-
-          [:h3 "One Hot Encoding"]
-          [:p "At this point we trye one-hot encoding any remaining string parameters."
-           [:pre (pp-str one-hot-the-rest)]
-           "Number of remaining string fields: "
-           (count (col-filters/string? one-hotted))]
-          (render-results "One Hot" one-hotted-results)
-          [:p "This didn't work out so well...we will just do string->number"]
+           (train-graph-regressors "Skew Fix"
+                                        (pipe-ops/string->number skew-fixed (col-filters/string? skew-fixed))
+                                        loss/rmse skew-fixed-options)]
 
 
           [:p "Now we std-scale.  Unlike the author, we do this over the entire dataset.
@@ -932,7 +943,7 @@ If this were a live situation, we would split the dataset before running any of 
 pipeline, not at this point as we have already generated means, medians in other
 operations.  But this dataset is very small and the real answers are from the submitted
 test set not this training dataset."
-           [:pre (->> (dataset/select one-hotted (take 10 numerical-features) :all)
+           [:pre (->> (dataset/select skew-fixed (take 10 numerical-features) :all)
                       (dataset/columns)
                       (map (fn [col]
                              (merge (ds-col/stats col [:mean :variance])
@@ -946,8 +957,7 @@ test set not this training dataset."
                              (merge (ds-col/stats col [:mean :variance])
                                     {:column-name  (ds-col/column-name col)})))
                       (print-table-str [:column-name :mean :variance]))]]
-
-          (render-results "Final" final-results)]
+          (train-graph-regressors "Final Results" final-dataset loss/rmse final-options)]
          oz/view!)))
 
 
