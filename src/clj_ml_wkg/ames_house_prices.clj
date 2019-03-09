@@ -15,11 +15,10 @@
 
             ;;use tablesaw as dataset backing store
             [tech.libs.tablesaw :as tablesaw]
+            [tech.ml.regression :as ml-regression]
+            [tech.ml.visualization.vega :as vega-viz]
 
             ;;model generators
-            [tech.libs.xgboost]
-            [tech.libs.smile.regression]
-            [tech.libs.svm]
             [tech.libs.daal.regression]
 
             ;;put/get nippy
@@ -493,76 +492,30 @@
    (print-table-str (sort (keys (first data))) data)))
 
 
-(defn verify-model
-  [trained-model test-ds loss-fn]
-  (let [predictions (ml/predict trained-model test-ds)
-        labels (dataset/labels test-ds (:options trained-model))
-        loss-val (loss-fn predictions labels)
-        residuals (m/sub labels predictions)]
-        (merge
-     {:loss loss-val
-      :residuals (vec residuals)
-      :predictions (vec predictions)
-      :average-loss loss-val
-      :labels labels}
-     trained-model)))
-
-
-(defn results->accuracy-dataset
-  [gridsearch-results]
-  (->> gridsearch-results
-       (map (fn [{:keys [average-loss options predict-time train-time]}]
-              {:average-loss average-loss
-               :model-name (str (:model-type options))
-               :predict-time predict-time
-               :train-time train-time}))))
-
-
 (defn render-results
   [title gridsearch-results]
   [:div
    [:h3 title]
-   [:vega-lite {:data {:values (results->accuracy-dataset gridsearch-results)}
-                :mark :point
-                :transform [{:filter {:field :average-loss :range [0.10, 0.20]}}]
-                :encoding {:y {:field :average-loss
-                               :type :quantitative
-                               :scale {:domain [0.10 0.20] }}
-                           :x {:field :model-name
-                               :type :nominal}
-                           :color {:field :model-name
-                                   :type :nominal}
-                           :shape {:field :model-name
-                                   :type :nominal}}}]])
+   (vega-viz/accuracy-graph gridsearch-results :y-scale [0.10, 0.20])])
+
 
 (defn train-regressors
   [dataset-name dataset loss-fn opts]
-  (let [base-systems [
+  (let [dataset (dataset/from-prototype dataset dataset-name (dataset/columns dataset))
+        base-systems [
                       ;;linear ends up blowing out the graphs.
                       ;; :daal.regression/linear
                       :daal.regression/ridge
                       :daal.regression/gradient-boosted-trees]
-        base-gridsearch-systems [
-                                 :libsvm/regression
-                                 :smile.regression/lasso]
-        train-test-split (dataset/->train-test-split dataset opts)
-        trained-results
-        (concat (->> base-systems
-                     (mapv (fn [model-type]
-                             (println (format "Training dataset %s model %s" dataset-name model-type))
-                             (let [best-model (ml/train (assoc opts :model-type model-type)
-                                                        (:train-ds train-test-split))]
-                               (verify-model best-model (:test-ds train-test-split) loss-fn)))))
-                (->> base-gridsearch-systems
-                     (mapv (fn [model-type]
-                             (println (format "Gridsearching dataset %s model %s" dataset-name model-type))
-                             (let [best-model (-> (ml/gridsearch (assoc opts
-                                                                        :model-type model-type
-                                                                        :k-fold 10
-                                                                        :gridsearch-depth 50)
-                                                                 loss-fn (:train-ds train-test-split))
-                                                  first)]
-                               (verify-model best-model (:test-ds train-test-split) loss-fn))))))]
+        base-gridsearch-systems [:smile.regression/lasso
+                                 :xgboost/regression]
+        trained-results (ml-regression/train-regressors
+                         dataset opts
+                         :loss-fn loss-fn
+                         :regression-systems base-systems
+                         :gridsearch-regression-systems base-gridsearch-systems)]
+    (println "Got" (count trained-results) "TRained results")
+    (println "Should have got 4 results")
     (vec trained-results)))
 
 
@@ -574,33 +527,28 @@
           (let [trained-results (train-regressors dataset-name dataset loss-fn opts)]
             (io/put-nippy! fname trained-results)
             trained-results)
-          (io/get-nippy fname))
-        flattened-results (->> trained-results
-                               (mapcat (fn [{:keys [options residuals predictions labels]}]
-                                         (map (fn [res pred label]
-                                                {:model-name (str (get options :model-type))
-                                                 :residual res
-                                                 :prediction pred
-                                                 :label label})
-                                              residuals predictions labels)))
-                               (group-by #(get-in % [:model-name])))]
-    (->> (apply concat (render-results dataset-name trained-results)
-                (->> flattened-results
-                     (map (fn [[model-name value-seq]]
+          (io/get-nippy fname))]
+    (->> (apply concat [(render-results dataset-name trained-results)]
+                (->> trained-results
+                     (sort-by :average-loss)
+                     (map (fn [model-result]
                             [[:div
-                              [:h4 model-name]
-                              [:vega-lite {:repeat {:column [:residual :prediction]}
-                                           :spec {:data {:values value-seq}
-                                                  :mark :point
-                                                  :encoding {:y {:field :label
-                                                                 :type :quantitative
-                                                                 :scale {:domain [8 14]}}
-                                                             :x {:field {:repeat :column}
-                                                                 :type :quantitative}
-                                                             :color {:field :model-name
-                                                                     :type :nominal}
-                                                             :shape {:field :model-name
-                                                                     :type :nominal}}}}]]]))))
+                              [:h3 (format "%s-%.4f"
+                                           (get-in model-result [:options :model-type])
+                                           (:average-loss model-result))]
+                              [:div
+                               [:span
+                                [:h4 "Predictions"]
+                                (vega-viz/graph-regression-verification-results
+                                 model-result :target-key :predictions
+                                 :y-scale [10 14]
+                                 :x-scale [10 14])]
+                               [:span
+                                [:h4 "Residuals"]
+                                (vega-viz/graph-regression-verification-results
+                                 model-result :target-key :residuals
+                                 :y-scale [10 14]
+                                 :x-scale [-1 1])]]]]))))
          (into [:div]))))
 
 
