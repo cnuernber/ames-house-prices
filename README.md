@@ -26,9 +26,9 @@ There is some dependency conflict with the csv subsystem tablesaw so from here i
 lein repl
 
 ;;load the ames namespace
-(require '[clj-ml-wkg/ames-house-prices])
+(require '[clj-ml-wkg.ames-house-prices])
 
-(in-ns 'clj-ml-wkg/ames-house-prices)
+(in-ns 'clj-ml-wkg.ames-house-prices)
 
 ;; To see progress against reference article: 
 
