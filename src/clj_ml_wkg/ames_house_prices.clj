@@ -108,15 +108,18 @@
                             "BsmtFinType2"
                             ;; Fence : data description says NA means "no fence"
                             "Fence"
-                            ;; FireplaceQu : data description says NA means "no fireplace"
+                            ;; FireplaceQu : data description says NA means "no
+                            ;; fireplace"
+
                             "FireplaceQu"
-                            ;; GarageType etc : data description says NA for garage features
-                            ;; is "no garage"
+                            ;; GarageType etc : data description says NA for garage
+                            ;; features is "no garage"
                             "GarageType"
                             "GarageFinish"
                             "GarageQual"
                             "GarageCond"
-                            ;; MiscFeature : data description says NA means "no misc feature"
+                            ;; MiscFeature : data description says NA means "no misc
+                            ;; feature"
                             "MiscFeature"
                             ;; PoolQC : data description says NA means "no pool"
                             "PoolQC"
@@ -302,7 +305,8 @@
       ;; Overall pool score
       (dsp/m= "PoolScore" #(dfn/* (col "PoolArea") (col "PoolQC")))
       ;; Simplified overall quality of the house
-      (dsp/m= "SimplOverallGrade" #(dfn/* (col "SimplOverallQual") (col "SimplOverallCond")))
+      (dsp/m= "SimplOverallGrade" #(dfn/* (col "SimplOverallQual")
+                                          (col "SimplOverallCond")))
       ;; Simplified overall quality of the exterior
       (dsp/m= "SimplExterGrade" #(dfn/* (col "SimplExterQual") (col "SimplExterCond")))
       ;; Simplified overall pool score
@@ -312,7 +316,8 @@
       ;; Simplified overall fireplace score
       (dsp/m= "SimplFireplaceScore" #(dfn/* (col "Fireplaces") (col "SimplFireplaceQu")))
       ;; Simplified overall kitchen score
-      (dsp/m= "SimplKitchenScore" #(dfn/* (col "KitchenAbvGr" ) (col "SimplKitchenQual")))
+      (dsp/m= "SimplKitchenScore" #(dfn/* (col "KitchenAbvGr" )
+                                          (col "SimplKitchenQual")))
       ;; Total number of bathrooms
       (dsp/m= "TotalBath" #(dfn/+ (col "BsmtFullBath") (dfn/* 0.5 (col "BsmtHalfBath"))
                                   (col "FullBath") (dfn/* 0.5 (col "HalfBath"))))
@@ -474,8 +479,10 @@
                  (set ["MSSubClass", "MSZoning", "Alley", "LandContour", "LotConfig",
                        "Neighborhood", "Condition1", "Condition2", "BldgType",
                        "HouseStyle", "RoofStyle", "RoofMatl", "Exterior1st",
-                       "Exterior2nd", "MasVnrType", "Foundation", "Heating", "CentralAir",
-                       "Electrical", "GarageType", "GarageFinish", "Fence", "MiscFeature",
+                       "Exterior2nd", "MasVnrType", "Foundation", "Heating",
+                       "CentralAir",
+                       "Electrical", "GarageType", "GarageFinish", "Fence",
+                       "MiscFeature",
                        "MoSold", "SaleType", "SaleCondition"])
                   (set categorical-features))
                  (map (comp ds-col/metadata (partial dataset/column poly-data)))))
@@ -485,7 +492,20 @@
   [dataset]
   (cf/and dataset
           cf/numeric?
-          ))
+          (cf/not dataset "SalePrice")
+          (cf/> dataset
+                #(dfn/abs (dfn/skewness (col)))
+                0.5)))
+
+(def skew-fixed (dsp/m= poly-data
+                        skew-column-filter
+                        #(dfn/log1p (col))))
+
+(println "Pre-fix skew counts" (count (skew-column-filter poly-data)))
+
+(println "Post-fix skew counts" (count (skew-column-filter skew-fixed)))
+
+
 (defn pp-str
   [ds]
   (with-out-str
