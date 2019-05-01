@@ -5,9 +5,10 @@
   (:require [tech.ml.dataset.pipeline
              :refer [col int-map]
              :as dsp]
+            [tech.v2.datatype :as dtype]
             [tech.v2.datatype.functional :as dfn]
             [tech.ml.dataset.pipeline.column-filters :as cf]
-            [tech.ml.dataset :as dataset]
+            [tech.ml.dataset :as ds]
             [tech.ml.dataset.column :as ds-col]
             [tech.ml :as ml]
             [tech.ml.loss :as loss]
@@ -15,6 +16,8 @@
 
             ;;use tablesaw as dataset backing store
             [tech.libs.tablesaw :as tablesaw]
+            [tech.libs.smile.regression]
+            [tech.libs.xgboost]
             [tech.ml.regression :as ml-regression]
             [tech.ml.visualization.vega :as vega-viz]
 
@@ -37,6 +40,22 @@
 (tech.ml.utils/set-slf4j-log-level :warn)
 
 
+(defn print-table
+  ([ks data]
+     (->> data
+          (map (fn [item-map]
+                 (->> item-map
+                      (map (fn [[k v]]
+                             [k (if (or (float? v)
+                                        (double? v))
+                                  (format "%.3f" v)
+                                  v)]))
+                      (into {}))))
+          (pp/print-table ks)))
+  ([data]
+   (print-table (sort (keys (first data))) data)))
+
+
 (def src-dataset (tablesaw/path->tablesaw-dataset "data/ames-house-prices/train.csv"))
 
 
@@ -47,9 +66,10 @@
   [dataset]
   (-> dataset
       ;;Convert any numeric or boolean columns to be all of one datatype.
-      (dsp/->datatype #(cf/or % cf/numeric? cf/boolean?))
       (dsp/remove-columns ["Id"])
-      (dsp/m= "SalePrice" #(dfn/log1p (dsp/col)))))
+      (dsp/->datatype)
+      (dsp/m= "SalePrice" #(dfn/log1p (dsp/col)))
+      (ds/set-inference-target "SalePrice")))
 
 
 (defn more-categorical
@@ -152,13 +172,13 @@
       (dsp/replace-missing "Utilities" "AllPub")))
 
 (println "pre missing fix #1")
-(pp/pprint (dataset/columns-with-missing-seq post-categorical-fix))
+(pp/pprint (ds/columns-with-missing-seq post-categorical-fix))
 
 (def post-missing (initial-missing-entries post-categorical-fix))
 
 (println "post missing fix #1")
 
-(pp/pprint (dataset/columns-with-missing-seq post-missing))
+(pp/pprint (ds/columns-with-missing-seq post-missing))
 
 
 (def str->number-initial-map
@@ -198,7 +218,7 @@
 
 (def str-num-dataset (str->number-pipeline post-missing))
 
-(pp/pprint (dataset/dataset-label-map str-num-dataset))
+(pp/pprint (ds/dataset-label-map str-num-dataset))
 
 
 (def replace-maps
@@ -281,10 +301,10 @@
 
 (def replace-dataset (simplifications str-num-dataset))
 
-(pp/pprint (-> (dataset/column str-num-dataset "KitchenQual")
+(pp/pprint (-> (ds/column str-num-dataset "KitchenQual")
                 (ds-col/unique)))
 
-(pp/pprint (-> (dataset/column replace-dataset "SimplKitchenQual")
+(pp/pprint (-> (ds/column replace-dataset "SimplKitchenQual")
                (ds-col/unique)))
 
 
@@ -339,10 +359,10 @@
 
 (let [print-columns ["TotalBath" "BsmtFullBath" "BsmtHalfBath"
                      "FullBath" "HalfBath"]]
-  (println (dataset/select linear-combined-ds print-columns (range 10))))
+  (println (ds/select linear-combined-ds print-columns (range 10))))
 
 (let [print-columns ["AllSF" "GrLivArea" "TotalBsmtSF"]]
-  (println (dataset/select linear-combined-ds print-columns (range 10))))
+  (println (ds/select linear-combined-ds print-columns (range 10))))
 
 
 (def article-correlations
@@ -413,7 +433,7 @@
    (sort-by second >)))
 
 
-(def tech-ml-correlations (get (dataset/correlation-table
+(def tech-ml-correlations (get (ds/correlation-table
                                 linear-combined-ds
                                 :pearson)
                                "SalePrice"))
@@ -426,8 +446,8 @@
 
 
 (defn polynomial-combinations
-  [dataset]
-  (let [correlation-colnames (->> tech-ml-correlations
+  [dataset correlation-table]
+  (let [correlation-colnames (->> correlation-table
                                   (drop 1)
                                   (take 10)
                                   (map first))]
@@ -439,10 +459,11 @@
                        (dsp/m= (str colname "-sqrt") #(dfn/sqrt (col colname)))))
                  dataset))))
 
-(def poly-data (polynomial-combinations linear-combined-ds))
+(def poly-data (-> (polynomial-combinations linear-combined-ds tech-ml-correlations)
+                   dsp/string->number))
 
 
-(println (dataset/select poly-data
+(println (ds/select poly-data
                          ["OverallQual"
                           "OverallQual-s2"
                           "OverallQual-s3"
@@ -451,28 +472,17 @@
 
 (def target-column-name "SalePrice")
 
-(defn numeric-features-column-filter
-  [dataset]
-  (cf/and dataset
-          (cf/not dataset target-column-name)
-          (cf/not dataset cf/target?)
-          cf/numeric?))
+(def numerical-features (cf/numeric-and-non-categorical-and-not-target poly-data))
+(def categorical-features (dsp/with-ds poly-data
+                            (cf/and #(cf/not cf/target?)
+                                    #(cf/not numerical-features))))
 
 
-(defn categorical-features-column-filter
-  [dataset]
-  (cf/and dataset
-          (cf/not dataset target-column-name)
-          (cf/not dataset cf/target?)
-          (cf/not dataset cf/numeric?)))
+(println "numeric-features" (count numerical-features))
 
-(def numerical-features (numeric-features-column-filter poly-data))
-(def categorical-features (categorical-features-column-filter poly-data))
+(println "categorical-features" (count categorical-features))
 
-
-(println (count numerical-features))
-
-(println (count categorical-features))
+(println "inference targets" (cf/target? poly-data))
 
 ;;I printed out the categorical features from the when using pandas.
 (pp/pprint (->> (c-set/difference
@@ -485,48 +495,51 @@
                        "MiscFeature",
                        "MoSold", "SaleType", "SaleCondition"])
                   (set categorical-features))
-                 (map (comp ds-col/metadata (partial dataset/column poly-data)))))
+                 (map (comp ds-col/metadata (partial ds/column poly-data)))))
 
 
 (defn skew-column-filter
-  [dataset]
-  (cf/and dataset
-          cf/numeric?
-          (cf/not dataset "SalePrice")
-          (cf/> dataset
-                #(dfn/abs (dfn/skewness (col)))
-                0.5)))
+  [& [dataset]]
+  (dsp/with-ds (cf/check-dataset dataset)
+    (cf/and cf/numeric?
+            #(cf/not "SalePrice")
+            #(cf/not cf/categorical?)
+            (fn []
+              (cf/> #(dfn/abs (dfn/skewness (col)))
+                    0.5)))))
 
-(def skew-fixed (dsp/m= poly-data
-                        skew-column-filter
-                        #(dfn/log1p (col))))
+(def skew-fixed (-> (dsp/m= poly-data
+                            skew-column-filter
+                            #(dfn/log1p (col)))))
 
 (println "Pre-fix skew counts" (count (skew-column-filter poly-data)))
 
 (println "Post-fix skew counts" (count (skew-column-filter skew-fixed)))
 
 
-(defn pp-str
-  [ds]
-  (with-out-str
-    (pp/pprint ds)))
+(def poly-std-scale-ds (dsp/std-scale poly-data))
+
+(def std-scale-ds (dsp/std-scale skew-fixed))
 
 
-(defn print-table-str
-  ([ks data]
-   (with-out-str
-     (->> data
-          (map (fn [item-map]
-                 (->> item-map
-                      (map (fn [[k v]]
-                             [k (if (or (float? v)
-                                        (double? v))
-                                  (format "%.3f" v)
-                                  v)]))
-                      (into {}))))
-          (pp/print-table ks))))
-  ([data]
-   (print-table-str (sort (keys (first data))) data)))
+
+(println "Before std-scaler")
+
+(->> (ds/select skew-fixed (take 10 numerical-features) :all)
+                      (ds/columns)
+                      (map (fn [col]
+                             (merge (ds-col/stats col [:mean :variance])
+                                    {:column-name (ds-col/column-name col)})))
+                      (print-table [:column-name :mean :variance]))
+
+(println "\n\nAfter std-scaler")
+
+(->> (ds/select std-scale-ds (take 10 numerical-features) :all)
+     (ds/columns)
+     (map (fn [col]
+            (merge (ds-col/stats col [:mean :variance])
+                   {:column-name  (ds-col/column-name col)})))
+     (pp/print-table [:column-name :mean :variance]))
 
 
 (defn render-results
@@ -537,28 +550,21 @@
 
 
 (defn train-regressors
-  [dataset-name dataset loss-fn opts]
-  (let [dataset (dataset/from-prototype dataset dataset-name (dataset/columns dataset))
-        base-gridsearch-systems [:smile.regression/lasso
-                                 :xgboost/regression]
+  [dataset-name dataset loss-fn & [options]]
+  (let [base-gridsearch-systems [:smile.regression/lasso
+                                 :xgboost/regression
+                                 :smile.regression/ridge]
         trained-results (ml-regression/train-regressors
-                         dataset opts
+                         dataset options
                          :loss-fn loss-fn
                          :gridsearch-regression-systems base-gridsearch-systems)]
-    (println "Got" (count trained-results) "TRained results")
-    (println "Should have got 4 results")
+    (println "Got" (count trained-results) "Trained results")
     (vec trained-results)))
 
 
 (defn train-graph-regressors
-  [dataset-name dataset loss-fn opts]
-  (let [fname (format "file://trained-models-%s.nippy" dataset-name)
-        trained-results
-        (if (not (.exists ^File (io/file fname)))
-          (let [trained-results (train-regressors dataset-name dataset loss-fn opts)]
-            (io/put-nippy! fname trained-results)
-            trained-results)
-          (io/get-nippy fname))]
+  [dataset-name dataset loss-fn & [options]]
+  (let [trained-results (train-regressors dataset-name dataset loss-fn options)]
     (->> (apply concat [(render-results dataset-name trained-results)]
                 (->> trained-results
                      (sort-by :average-loss)
@@ -581,3 +587,84 @@
                                  :y-scale [10 14]
                                  :x-scale [-1 1])]]]]))))
          (into [:div]))))
+
+
+(oz/view! [:div
+           (train-graph-regressors "Before Skew Fix" poly-data loss/rmse)
+           (train-graph-regressors "Skew Fixed" skew-fixed loss/rmse)
+           (train-graph-regressors "StdScale Before Skew Fix" poly-std-scale-ds loss/rmse)
+           (train-graph-regressors "StdScale Skew Fix" std-scale-ds loss/rmse)])
+
+
+
+(defn data-pipeline
+  "Now you have a model and you want to go to production."
+  [dataset training?]
+  (let [sale-price-col (when training?
+                         (dsp/without-recording
+                          (-> dataset
+                              ;;Sale price is originally an integer
+                              (dsp/m= "SalePrice" #(-> (dsp/col)
+                                                       (dtype/->reader :float64)
+                                                       dfn/log1p))
+                              (ds/column "SalePrice"))))
+
+        dataset (if training?
+                  (ds/remove-columns dataset ["SalePrice"])
+                  dataset)
+        dataset
+        (-> dataset
+            (dsp/remove-columns ["Id"])
+            (dsp/->datatype)
+            more-categorical
+            initial-missing-entries
+            str->number-pipeline
+            simplifications
+            linear-combinations
+            (dsp/store-variables #(hash-map :correlation-table
+                                            (-> (ds/add-column % sale-price-col)
+                                                (ds/correlation-table :pearson)
+                                                (get "SalePrice"))))
+            (polynomial-combinations (dsp/read-var :correlation-table))
+            dsp/std-scale)]
+    (if training?
+      (-> (ds/add-column dataset sale-price-col)
+          (ds/set-inference-target "SalePrice"))
+      dataset)))
+
+
+
+(def inference-pipeline-data (dsp/pipeline-train-context
+                              (data-pipeline src-dataset true)))
+
+(def pipeline-train-dataset (:dataset inference-pipeline-data))
+
+
+(def inference-pipeline-context (:context inference-pipeline-data))
+
+
+;;At inference time we wouldn't have the saleprice column
+(def test-inference-src-dataset (dsp/remove-columns src-dataset ["SalePrice"]))
+
+
+;;Now we can build the same dataset easily using context built during
+;;the training system.  This means any string tables generated or any range
+;;k-means, stdscale, etc are all in the context.
+(def pipelin-inference-dataset (:dataset
+                                (dsp/pipeline-inference-context
+                                 inference-pipeline-context
+                                 (inference-pipeline test-inference-src-dataset false))))
+
+
+(println (ds/select inference-pipeline-dataset ["OverallQual"
+                                                "OverallQual-s2"
+                                                "OverallQual-s3"
+                                                "OverallQual-sqrt"]
+                    (range 10)))
+
+
+(println (ds/select inference-dataset ["OverallQual"
+                                       "OverallQual-s2"
+                                       "OverallQual-s3"
+                                       "OverallQual-sqrt"]
+                    (range 10)))
