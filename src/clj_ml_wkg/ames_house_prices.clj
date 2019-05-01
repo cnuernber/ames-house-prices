@@ -202,6 +202,8 @@
   {
    ;; Create new features
    ;; 1* Simplifications of existing features
+   ;; The author implicitly leaves values at zero to be zero, so these maps
+   ;; are intentionally incomplete
    "SimplOverallQual" {"OverallQual" {1  1, 2  1, 3  1, ;; bad
                                      4  2, 5  2, 6  2, ;; average
                                      7  3, 8  3, 9  3, 10  3 ;; good
@@ -270,7 +272,8 @@
        (reduce (fn [dataset [target-name coldata-map]]
                  (let [[col-name replace-data] (first coldata-map)]
                    (dsp/m= dataset target-name
-                           #(dsp/int-map replace-data (dsp/col col-name)))))
+                           #(dsp/int-map replace-data (dsp/col col-name)
+                                         :not-strict? true))))
                dataset)))
 
 (def replace-dataset (simplifications str-num-dataset))
@@ -440,6 +443,49 @@
                           "OverallQual-s3"
                           "OverallQual-sqrt"]
                          (range 10)))
+
+(def target-column-name "SalePrice")
+
+(defn numeric-features-column-filter
+  [dataset]
+  (cf/and dataset
+          (cf/not dataset target-column-name)
+          (cf/not dataset cf/target?)
+          cf/numeric?))
+
+
+(defn categorical-features-column-filter
+  [dataset]
+  (cf/and dataset
+          (cf/not dataset target-column-name)
+          (cf/not dataset cf/target?)
+          (cf/not dataset cf/numeric?)))
+
+(def numerical-features (numeric-features-column-filter poly-data))
+(def categorical-features (categorical-features-column-filter poly-data))
+
+
+(println (count numerical-features))
+
+(println (count categorical-features))
+
+;;I printed out the categorical features from the when using pandas.
+(pp/pprint (->> (c-set/difference
+                 (set ["MSSubClass", "MSZoning", "Alley", "LandContour", "LotConfig",
+                       "Neighborhood", "Condition1", "Condition2", "BldgType",
+                       "HouseStyle", "RoofStyle", "RoofMatl", "Exterior1st",
+                       "Exterior2nd", "MasVnrType", "Foundation", "Heating", "CentralAir",
+                       "Electrical", "GarageType", "GarageFinish", "Fence", "MiscFeature",
+                       "MoSold", "SaleType", "SaleCondition"])
+                  (set categorical-features))
+                 (map (comp ds-col/metadata (partial dataset/column poly-data)))))
+
+
+(defn skew-column-filter
+  [dataset]
+  (cf/and dataset
+          cf/numeric?
+          ))
 (defn pp-str
   [ds]
   (with-out-str
@@ -473,17 +519,11 @@
 (defn train-regressors
   [dataset-name dataset loss-fn opts]
   (let [dataset (dataset/from-prototype dataset dataset-name (dataset/columns dataset))
-        base-systems [
-                      ;;linear ends up blowing out the graphs.
-                      ;; :daal.regression/linear
-                      :daal.regression/ridge
-                      :daal.regression/gradient-boosted-trees]
         base-gridsearch-systems [:smile.regression/lasso
                                  :xgboost/regression]
         trained-results (ml-regression/train-regressors
                          dataset opts
                          :loss-fn loss-fn
-                         :regression-systems base-systems
                          :gridsearch-regression-systems base-gridsearch-systems)]
     (println "Got" (count trained-results) "TRained results")
     (println "Should have got 4 results")
