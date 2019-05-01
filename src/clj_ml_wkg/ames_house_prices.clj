@@ -459,8 +459,7 @@
                        (dsp/m= (str colname "-sqrt") #(dfn/sqrt (col colname)))))
                  dataset))))
 
-(def poly-data (-> (polynomial-combinations linear-combined-ds tech-ml-correlations)
-                   dsp/string->number))
+(def poly-data (polynomial-combinations linear-combined-ds tech-ml-correlations))
 
 
 (println (ds/select poly-data
@@ -495,8 +494,21 @@
                        "MiscFeature",
                        "MoSold", "SaleType", "SaleCondition"])
                   (set categorical-features))
-                 (map (comp ds-col/metadata (partial ds/column poly-data)))))
+                (map (comp ds-col/metadata (partial ds/column poly-data)))))
 
+(defn fix-all-missing
+  [dataset]
+  (-> dataset
+      ;;Fix any remaining numeric columns by using the median.
+      (dsp/replace-missing cf/numeric? #(dfn/median (col)))
+      ;;Fix any string columns by using 'NA'.
+      (dsp/replace-missing cf/string? "NA")
+      (dsp/string->number)))
+
+
+(def missing-fixed (fix-all-missing poly-data))
+
+(pp/pprint (ds/columns-with-missing-seq missing-fixed))
 
 (defn skew-column-filter
   [& [dataset]]
@@ -508,16 +520,16 @@
               (cf/> #(dfn/abs (dfn/skewness (col)))
                     0.5)))))
 
-(def skew-fixed (-> (dsp/m= poly-data
+(def skew-fixed (-> (dsp/m= missing-fixed
                             skew-column-filter
                             #(dfn/log1p (col)))))
 
-(println "Pre-fix skew counts" (count (skew-column-filter poly-data)))
+(println "Pre-fix skew counts" (count (skew-column-filter missing-fixed)))
 
 (println "Post-fix skew counts" (count (skew-column-filter skew-fixed)))
 
 
-(def poly-std-scale-ds (dsp/std-scale poly-data))
+(def poly-std-scale-ds (dsp/std-scale missing-fixed))
 
 (def std-scale-ds (dsp/std-scale skew-fixed))
 
@@ -589,11 +601,7 @@
          (into [:div]))))
 
 
-(oz/view! [:div
-           (train-graph-regressors "Before Skew Fix" poly-data loss/rmse)
-           (train-graph-regressors "Skew Fixed" skew-fixed loss/rmse)
-           (train-graph-regressors "StdScale Before Skew Fix" poly-std-scale-ds loss/rmse)
-           (train-graph-regressors "StdScale Skew Fix" std-scale-ds loss/rmse)])
+(oz/view! (train-graph-regressors "StdScale Skew Fix" std-scale-ds loss/rmse))
 
 
 
@@ -626,6 +634,7 @@
                                                 (ds/correlation-table :pearson)
                                                 (get "SalePrice"))))
             (polynomial-combinations (dsp/read-var :correlation-table))
+            fix-all-missing
             dsp/std-scale)]
     (if training?
       (-> (ds/add-column dataset sale-price-col)
@@ -650,21 +659,21 @@
 ;;Now we can build the same dataset easily using context built during
 ;;the training system.  This means any string tables generated or any range
 ;;k-means, stdscale, etc are all in the context.
-(def pipelin-inference-dataset (:dataset
+(def pipeline-inference-dataset (:dataset
                                 (dsp/pipeline-inference-context
                                  inference-pipeline-context
-                                 (inference-pipeline test-inference-src-dataset false))))
+                                 (data-pipeline test-inference-src-dataset false))))
 
 
-(println (ds/select inference-pipeline-dataset ["OverallQual"
-                                                "OverallQual-s2"
-                                                "OverallQual-s3"
-                                                "OverallQual-sqrt"]
+(println (ds/select pipeline-train-dataset ["OverallQual"
+                                            "OverallQual-s2"
+                                            "OverallQual-s3"
+                                            "OverallQual-sqrt"]
                     (range 10)))
 
 
-(println (ds/select inference-dataset ["OverallQual"
-                                       "OverallQual-s2"
-                                       "OverallQual-s3"
-                                       "OverallQual-sqrt"]
+(println (ds/select pipeline-inference-dataset ["OverallQual"
+                                                "OverallQual-s2"
+                                                "OverallQual-s3"
+                                                "OverallQual-sqrt"]
                     (range 10)))
