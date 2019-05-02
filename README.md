@@ -2,7 +2,7 @@
 
 Exploration of kaggle ames house prices comp.
 
-Check out the [nbviewer version](https://nbviewer.jupyter.org/github/cnuernber/ames-house-prices/blob/acb961538e9b1cbbef8fb1733ecdd4b0012ffd89/ames-housing-prices-clojure.ipynb).
+Check out the [nbviewer version](https://nbviewer.jupyter.org/github/cnuernber/ames-house-prices/blob/82e3ce1679b3e6e31c0128290f60ef7ae16947b0/ames-housing-prices-clojure.ipynb).
 
 ## Usage
 
