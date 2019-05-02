@@ -601,7 +601,11 @@
          (into [:div]))))
 
 
-(oz/view! (train-graph-regressors "StdScale Skew Fix" std-scale-ds loss/rmse))
+(oz/view! [:div
+           (train-graph-regressors "Missing" missing-fixed loss/rmse)
+           (train-graph-regressors "Skew" skew-fixed loss/rmse)
+           (train-graph-regressors "Missing + StdScale" poly-std-scale-ds loss/rmse)
+           (train-graph-regressors "Skew + StdScale" std-scale-ds loss/rmse)])
 
 
 
