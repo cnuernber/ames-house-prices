@@ -8,6 +8,12 @@
             [tech.v2.datatype :as dtype]
             [tech.v2.datatype.functional :as dfn]
             [tech.ml.dataset.pipeline.column-filters :as cf]
+            [tech.ml.dataset.pipeline.base
+             :refer [with-ds]]
+            [tech.ml.dataset.pipeline.pipeline-operators
+             :refer [without-recording
+                     pipeline-train-context
+                     pipeline-inference-context]]
             [tech.ml.dataset :as ds]
             [tech.ml.dataset.column :as ds-col]
             [tech.ml :as ml]
@@ -27,12 +33,15 @@
             [oz.core :as oz]
 
             [clojure.pprint :as pp]
-            [clojure.set :as c-set]
-            [clojure.core.matrix :as m])
+            [clojure.set :as c-set])
 
   (:import [tech.ml.protocols.etl PETLSingleColumnOperator]
            [java.io File]))
 
+;; (time (require '[clj-ml-wkg.ames-house-prices]))
+
+;; old tech.ml 34224.952879 msec
+;; new (no core.matrix, less metaprogramming, precompiled) tech.ml 24067.88257
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -472,7 +481,7 @@
 (def target-column-name "SalePrice")
 
 (def numerical-features (cf/numeric-and-non-categorical-and-not-target poly-data))
-(def categorical-features (dsp/with-ds poly-data
+(def categorical-features (with-ds poly-data
                             (cf/and #(cf/not cf/target?)
                                     #(cf/not numerical-features))))
 
@@ -512,7 +521,7 @@
 
 (defn skew-column-filter
   [& [dataset]]
-  (dsp/with-ds (cf/check-dataset dataset)
+  (with-ds (cf/check-dataset dataset)
     (cf/and cf/numeric?
             #(cf/not "SalePrice")
             #(cf/not cf/categorical?)
@@ -613,7 +622,7 @@
   "Now you have a model and you want to go to production."
   [dataset training?]
   (let [sale-price-col (when training?
-                         (dsp/without-recording
+                         (without-recording
                           (-> dataset
                               ;;Sale price is originally an integer
                               (dsp/m= "SalePrice" #(-> (dsp/col)
@@ -647,7 +656,7 @@
 
 
 
-(def inference-pipeline-data (dsp/pipeline-train-context
+(def inference-pipeline-data (pipeline-train-context
                               (data-pipeline src-dataset true)))
 
 (def pipeline-train-dataset (:dataset inference-pipeline-data))
@@ -664,7 +673,7 @@
 ;;the training system.  This means any string tables generated or any range
 ;;k-means, stdscale, etc are all in the context.
 (def pipeline-inference-dataset (:dataset
-                                (dsp/pipeline-inference-context
+                                (pipeline-inference-context
                                  inference-pipeline-context
                                  (data-pipeline test-inference-src-dataset false))))
 
