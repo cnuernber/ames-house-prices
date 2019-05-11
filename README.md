@@ -25,14 +25,8 @@ There is some dependency conflict with the csv subsystem tablesaw so from here i
 ```clojure
 lein repl
 
-;;load the ames namespace
+;;load the ames namespace and do the things
 (require '[clj-ml-wkg.ames-house-prices])
-
-(in-ns 'clj-ml-wkg.ames-house-prices)
-
-;; To see progress against reference article: 
-
-(presentation)
 
 ```
 
